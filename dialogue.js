@@ -1,0 +1,378 @@
+/* Dialogue engine: who says each line of dialogue in a Chinese novel.
+ *
+ * Runs entirely in the browser, no network. Two passes over the book:
+ *  1. buildCast(chapters): find character names from how the book tags speech
+ *     ("X道：" / "”X笑道。"), using right-branching to cut names out of the
+ *     surrounding words (so 克莱恩 is kept, 克莱恩笑 and 克莱 are not). The cast is
+ *     ranked by how often each character speaks; colours and avatars are assigned
+ *     from that rank, so the same txt file gives the same cast, colours and
+ *     avatars on every device and in every chapter.
+ *  2. attributeChapter(chapter, cast, prevTail): split each paragraph into
+ *     narration and quotes and give every spoken quote a speaker + confidence:
+ *       'explicit'  tagged with a speech verb  (X道：“…” / “…”X问。)
+ *       'context'   the paragraph's own actor  (X皱了皱眉。“…”) or a continued quote
+ *       'inferred'  pronoun or turn-taking guess (他道：“…” / A,B,A…)
+ *       null        not enough evidence -> shown as an unknown speaker
+ *
+ * Works in browsers (window.Dialogue) and Node (module.exports) so it can be tested
+ * against real books.
+ */
+(function (root) {
+  'use strict';
+  const VERSION = 1;
+  const HAN = '\\u3400-\\u9fff';
+  const DOT = '·•‧・';
+  const SPEECH = '说道|问道|答道|笑道|叹道|喝道|叫道|喊道|骂道|回道|应道|回答道|开口道|出声道|低声道|轻声道|沉声道|冷声道|厉声道|柔声道|' +
+    '说|道|问|答|喊|叫|嚷|吼|喝|骂|叹|嘀咕|呢喃|喃喃|低语|开口|回答|回应|询问|追问|反问|解释|补充|感叹|吩咐|提醒|重复|插话|嘟囔|' +
+    '宣布|命令|祈求|祷告|念诵|诵念|自语|附和|打断|强调|介绍|总结|安慰|招呼|吐槽|抱怨|嘟哝|咕哝|呼喊|叮嘱|交代|请求|喊道|笑着说';
+  const SPEECH_RE = new RegExp('(' + SPEECH + ')');
+  const PRONOUN_RE = /^(他|她|它|祂|我|你|您|他们|她们|对方|那人|此人|众人|大家|两人|三人|有人)/;
+  /* sentence-initial words that are not names; stripped before reading the subject */
+  const LEAD = ['这个瞬间', '这一刻', '此刻', '此时此刻', '下一秒钟', '然后', '于是', '这时', '此时', '随即', '接着', '紧接着', '片刻后', '过了一会儿', '过了几秒', '过了片刻', '最终', '最后', '终于',
+    '但', '而', '可', '只见', '旁边的', '对面的', '同时', '突然', '忽然', '顿时', '立刻', '马上', '很快', '这一次', '这次', '下一秒', '下一刻',
+    '见状', '闻言', '听到这里', '听到这句话', '说完', '说到这里', '想了想', '想了一下', '沉默了几秒', '沉默片刻', '与此同时', '另一边', '当然',
+    '因此', '所以', '又', '也', '还', '则', '便', '就', '才', '再', '都', '一旁的', '身旁的', '身边的', '坐在', '站在', '旁边'];
+  const LEAD_RE = new RegExp('^(?:' + LEAD.sort((a, b) => b.length - a.length).join('|') + ')[，,]?');
+  /* frequent sentence starters that look like names to the branching test */
+  const STOP = new Set(['这个', '那个', '这位', '那位', '这里', '那里', '这样', '那样', '这种', '那种', '这些', '那些', '什么', '怎么', '为什么',
+    '如果', '虽然', '因为', '不过', '但是', '可是', '然而', '而且', '只是', '只要', '甚至', '其中', '其他', '其余', '另外', '另一位', '一位',
+    '一个', '一名', '一道', '一阵', '一声', '一边', '整个', '所有', '每个', '各自', '自己', '目前', '现在', '刚才', '之前', '之后', '然后',
+    '接下来', '紧接着', '同时', '他们', '她们', '我们', '你们', '对方', '大家', '众人', '两人', '三人', '有人', '没有', '不是', '就是',
+    '还是', '已经', '正在', '似乎', '好像', '仿佛', '依旧', '仍然', '果然', '当然', '确实', '真的', '的确', '心里', '心中', '脑海', '内心',
+    '声音', '语气', '表情', '目光', '视线', '眼睛', '脸上', '嘴里', '嘴角', '老人', '男子', '女子', '少女', '少年', '青年', '女孩', '男孩',
+    '女士', '先生', '小姐', '夫人', '中年男子', '中年人', '年轻人', '老者', '侍者', '仆人', '女仆', '男仆', '警察', '店主', '老板', '他的',
+    '她的', '它们', '这名', '那名', '这道', '那道', '于是', '这时', '此时', '随即', '接着', '片刻后', '最终', '最后', '终于', '突然', '忽然',
+    '顿时', '立刻', '马上', '很快', '见状', '闻言', '说完', '想了想', '沉默', '笑了笑', '点了点头', '摇了摇头', '开口', '回答', '询问',
+    '低声', '轻声', '沉声', '下一秒', '下一刻', '与此同时', '这一次', '这次', '因此', '所以', '可惜', '幸好', '虽说', '听到', '看到',
+    '旁边', '对面', '身旁', '周围', '外面', '里面', '上面', '下面', '前面', '后面', '略显', '略带', '颇为']);
+  /* fragments that are never names: leading prepositions/negations, trailing aspect particles */
+  const FRAG_RE = /^(?:的|在|对|向|把|被|和|与|给|跟|将|让|从|朝|往|见|没|不|很|有一|另外)|.[了着过到地]$|的$|^.[了着过向住至]|^.[笑完然感眸哑静起下上出在定开回进住]$|之[上下中内外前后间]$/;
+  /* parse dialogue-words.txt -> {all:Set, verbish:Set} */
+  function parseWords(txt) {
+    const all = new Set(), verbish = new Set();
+    for (const line of String(txt || '').split('\n')) {
+      if (!line || line[0] === '#') continue;
+      if (line[0] === '!') { const w = line.slice(1).trim(); all.add(w); verbish.add(w) } else all.add(line.trim());
+    }
+    return { all, verbish };
+  }
+  /* common characters that start clauses but are never a one-character name */
+  const SINGLE_STOP = '祂他她它我你您这那就又也还都便只但而可在是有没不很再才却则且并即已正将把被让给对向从朝往和与跟同及或若如虽因所以为了的地得着过一二三四五六七八九十几两个些每各某其此该何谁什么怎么哪多少大小老新旧上下左右前后里外中内东西南北见看听说问答想觉知道笑哭叫喊走跑坐站拿放打开关吃喝睡醒抬低点摇伸收转回进出来去到起落用以于至自当随沿顺按据趁凭靠替为由经等似像如同比更最太极非真实好坏高矮长短快慢早晚先后刚才曾已经正在马上立刻忽然突然渐渐慢慢轻轻静静默默悄悄偷偷心眼手脚头脸嘴身声音气光影门窗墙桌椅床车船街路房屋人物事情话语字句书信纸笔衣帽鞋袜钱金银铜铁石木水火土风雨雪云天地日月星时分秒年月日夜晨昏今昨明';
+  const TITLE_RE = /^[“「『]([\u3400-\u9fff]{1,6})[”」』](?=[\u3400-\u9fff])/;
+  const QUOTE_RE = /[“「『]([^”」』]*)[”」』]/g;
+  const END_PUNCT = /[。？！?!…—~～，,、；;）)]$/;
+
+  const nameCharRe = new RegExp('[' + HAN + DOT + ']');
+
+  function stripLead(s) {
+    let prev;
+    s = s.replace(/^[…—\s　]+/, '');
+    do { prev = s; s = s.replace(LEAD_RE, '') } while (s !== prev && s);
+    return s;
+  }
+  /* last sentence of a narration chunk (before a colon or quote) */
+  function lastSentence(s) {
+    const parts = s.split(/[。！？!?…；;]/);
+    for (let i = parts.length - 1; i >= 0; i--) if (parts[i].trim()) return parts[i].trim();
+    return '';
+  }
+  function firstClause(s) { return (s.split(/[。！？!?…；;“「]/)[0] || '').trim() }
+
+  /* Split a paragraph into ordered segments: {t:'n', text} narration, {t:'q', text, spoken} quote */
+  function segment(p, prevEndsColon) {
+    const segs = []; let last = 0, m, anySpoken = false;
+    QUOTE_RE.lastIndex = 0;
+    while ((m = QUOTE_RE.exec(p))) {
+      if (m.index > last) segs.push({ t: 'n', text: p.slice(last, m.index) });
+      const inner = m[1], before = p.slice(0, m.index), open = p[m.index], close = p[m.index + m[0].length - 1];
+      const atStart = m.index === 0 || /[：:]\s*$/.test(before) || /[”」』]\s*$/.test(before);
+      const glued = /^[\u3400-\u9fff]/.test(p.slice(m.index + m[0].length)) && !END_PUNCT.test(inner) && inner.length <= 8;
+      const spoken = inner.length > 0 && !glued && (
+        (atStart && (END_PUNCT.test(inner) || inner.length > 8 || (m.index === 0 && prevEndsColon))) ||
+        (/[：:，,]\s*$/.test(before) && SPEECH_RE.test(lastSentence(before).slice(-8)) && inner.length > 1) ||
+        (anySpoken && /[：:，,]\s*$/.test(before) && (END_PUNCT.test(inner) || inner.length > 8))   /* “…”X摇头，“…” */
+      );
+      if (spoken) anySpoken = true;
+      segs.push({ t: 'q', text: inner, open, close, spoken });
+      last = m.index + m[0].length;
+    }
+    if (last < p.length) segs.push({ t: 'n', text: p.slice(last) });
+    return segs;
+  }
+
+  /* ---------- pass 1: cast ---------- */
+  function* subjectSlots(paras) {
+    /* yield raw text that starts at a speaker-subject position */
+    for (let i = 0; i < paras.length; i++) {
+      const p = paras[i];
+      if (/[：:]$/.test(p) && i + 1 < paras.length && /^[“「]/.test(paras[i + 1])) {
+        const s = lastSentence(p.replace(/[：:]$/, ''));
+        if (SPEECH_RE.test(s.slice(-8))) {
+          for (const c of s.split(/[，,]/)) yield stripLead(c.trim());
+        }
+      }
+      QUOTE_RE.lastIndex = 0; let m;
+      while ((m = QUOTE_RE.exec(p))) {
+        const after = p.slice(m.index + m[0].length);
+        const c = firstClause(after);
+        if (c && SPEECH_RE.test(c.slice(0, 14))) yield stripLead(c);
+        const before = p.slice(0, m.index);
+        if (/[：:]\s*$/.test(before)) {
+          const s = lastSentence(before.replace(/[：:]\s*$/, ''));
+          if (SPEECH_RE.test(s.slice(-8))) for (const cl of s.split(/[，,]/)) yield stripLead(cl.trim());
+        }
+      }
+    }
+  }
+
+  function buildCast(chapters, opts = {}) {
+    const paras = chapters.flatMap(c => c.paras);
+    const cnt = new Map(), ext = new Map(), titles = new Map();
+    const bump = (m, k, n = 1) => m.set(k, (m.get(k) || 0) + n);
+    for (const slot of subjectSlots(paras)) {
+      if (!slot || PRONOUN_RE.test(slot)) continue;
+      const qt = slot.match(TITLE_RE);
+      if (qt) {                                   /* quoted code name used as a subject */
+        const nm = '“' + qt[1] + '”';
+        bump(cnt, nm); bump(titles, nm);
+        let e = ext.get(nm); if (!e) ext.set(nm, e = new Map());
+        bump(e, slot[qt[0].length] || '#');
+        continue;
+      }
+      let k = 0;
+      while (k < slot.length && k < 12 && nameCharRe.test(slot[k])) k++;
+      const w = slot.slice(0, k);
+      for (let L = 1; L <= Math.min(10, w.length); L++) {
+        const pre = w.slice(0, L);
+        if (DOT.includes(pre[L - 1])) continue;
+        bump(cnt, pre);
+        const nx = L < slot.length ? slot[L] : '#';
+        let e = ext.get(pre); if (!e) ext.set(pre, e = new Map());
+        bump(e, nx);
+      }
+    }
+    /* right-branching: a name is followed by many different characters */
+    const min = opts.minCount || 4;
+    const words = opts.words || { all: new Set(), verbish: new Set() };
+    const isWord = w => STOP.has(w) || words.all.has(w) ||
+      (w.length >= 3 && !DOT.split('').some(d => w.includes(d)) && (words.all.has(w.slice(0, 2)) || STOP.has(w.slice(0, 2)))) ||
+      /^(边|一边|用|以|于|却|是|忙|好|半|低|慢|轻|嘴|语|嗓|眸|眼|面朝|下意识|笑容|握|环视|双手|小心|颇|具现|勾勒|拔|轻敲|侧|未|略|穿|笑呵呵|自言自语|金发|黑发|黄发|棕发|红发|白发)/.test(w);
+    let cands = [], singles = [];
+    for (const [w, c] of cnt) {
+      if (w.length === 1) {
+        if (c < 15 || SINGLE_STOP.includes(w) || DOT.includes(w)) continue;
+        const e = ext.get(w); let top = 0; for (const v of e.values()) top = Math.max(top, v);
+        if (e.size >= 8 && top / c < 0.3) singles.push({ name: w, count: c, single: true });
+        continue;
+      }
+      if (titles.has(w)) { if (c >= min && !/^“[嗯啊哦呵哈唔咦哼嘿喂呃噢唉嗬]+”$/.test(w)) cands.push({ name: w, count: c }); continue }
+      if (c < min || isWord(w) || FRAG_RE.test(w) || /^(?:[一二三四五六七八九十几两]|这|那|某|每|其|该|此)/.test(w)) continue;
+      if (SPEECH_RE.test(w.slice(-2)) && !DOT.split('').some(d => w.includes(d))) continue;
+      const e = ext.get(w); let top = 0;
+      for (const v of e.values()) top = Math.max(top, v);
+      if (top / c > 0.55) continue;                       /* mostly continues with the same char -> not a word end */
+      cands.push({ name: w, count: c });
+    }
+    /* drop a candidate that is just a prefix of a stronger one (克莱 vs 克莱恩) */
+    cands = cands.filter(a => a.single || !cands.some(b => b !== a && b.name.startsWith(a.name) && !DOT.includes(b.name[a.name.length]) && b.count >= a.count * 0.6));
+    /* a one-character name must not just be the first character of other names (艾 from 艾伦/艾辛格) */
+    for (const one of singles) {
+      const longer = cands.filter(b => b.name[0] === one.name && b.name.split(/[·•‧・]/)[0] !== one.name);
+      const real = longer.filter(b => !words.all.has(b.name.slice(1, 3)) && !SPEECH_RE.test(b.name.slice(1, 3)) && b.count >= 8);
+      if (real.length) continue;
+      /* and the book must also give it as the first part of a full name: 休 / 休·迪尔查 */
+      const full = [...cnt.keys()].some(k => k.length > 2 && k.split(/[·•‧・]/)[0] === one.name && /[·•‧・]/.test(k));
+      if (full) cands.push(one);
+    }
+    /* a longer candidate that starts with a one-character name is that name plus a verb (休犹豫) */
+    cands = cands.filter(a => !cands.some(b => b !== a && b.single && a.name.length > 1 && a.name.startsWith(b.name) && !DOT.includes(a.name[1])));
+    /* drop "name + verb" phrases (克莱恩笑) when the bare name is a candidate */
+    cands = cands.filter(a => !cands.some(b => b !== a && a.name.startsWith(b.name) && !DOT.includes(a.name[b.name.length]) && b.count >= a.count));
+    /* aliases: 阿兹克·艾格斯 -> 阿兹克, keep the most frequent form as the display name */
+    const alias = new Map();
+    const isTitle = pre => { for (let i = 0; i <= pre.length - 2; i++) if (words.all.has(pre.slice(i)) || STOP.has(pre.slice(i))) return true; return false };
+    for (const a of cands) for (const b of cands)
+      if (a !== b && b.name.startsWith(a.name) && DOT.includes(b.name[a.name.length])) alias.set(b.name, a.name);
+    for (const a of cands) for (const b of cands)
+      if (a !== b && !a.single && a.name.length >= 2 && b.name.length > a.name.length && b.name.endsWith(a.name) && !alias.has(b.name) &&
+          isTitle(b.name.slice(0, b.name.length - a.name.length))) alias.set(b.name, alias.get(a.name) || a.name);
+    const byName = new Map();
+    for (const a of cands) {
+      const root = alias.get(a.name) || a.name;
+      if (!byName.has(root)) byName.set(root, { id: root, name: root, aliases: [], count: 0 });
+      const ch = byName.get(root);
+      if (a.name !== root) ch.aliases.push(a.name);
+      ch.count += a.count;
+    }
+    /* count actual speaking turns to rank the cast */
+    let cast = [...byName.values()];
+    const matcher = makeMatcher(cast);
+    const turns = new Map();
+    let ctxTail = null;
+    for (const ch of chapters) {
+      const res = attributeChapter(ch, { list: cast, matcher }, ctxTail);
+      ctxTail = res.tail;
+      for (const para of res.paras) for (const s of para) if (s.t === 'q' && s.speaker && s.conf !== 'inferred') bump(turns, s.speaker);
+    }
+    cast.forEach(c => c.lines = turns.get(c.id) || 0);
+    cast = cast.filter(c => c.lines >= (opts.minLines || 5)).sort((a, b) => b.lines - a.lines || a.id.localeCompare(b.id));
+    cast.forEach((c, i) => { c.rank = i; Object.assign(c, look(c, i)) });
+    return { version: VERSION, list: cast, matcher: makeMatcher(cast) };
+  }
+
+  function makeMatcher(cast) {
+    const forms = [];
+    for (const c of cast) { forms.push([c.name, c.id]); for (const a of c.aliases || []) forms.push([a, c.id]) }
+    forms.sort((a, b) => b[0].length - a[0].length);
+    const map = new Map(forms);
+    const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = forms.length ? new RegExp(forms.map(f => esc(f[0])).join('|'), 'g') : null;
+    return {
+      /* all name mentions in s: [{id, at, len}] */
+      all(s) { if (!re) return []; re.lastIndex = 0; const out = []; let m; while ((m = re.exec(s))) { if (m[0].length > 1) out.push({ id: map.get(m[0]), at: m.index, len: m[0].length }); else re.lastIndex = m.index + 1 } return out },
+      lead(s) {
+        let t = stripLead(s); if (!re) return null;
+        const qt = t.match(TITLE_RE);
+        if (qt) {
+          const rest = t.slice(qt[0].length);
+          re.lastIndex = 0; const m2 = re.exec(rest);
+          if (m2 && m2.index === 0) return map.get(m2[0]);        /* “正义”奥黛丽 -> 奥黛丽 */
+          return map.get('“' + qt[1] + '”') || null;              /* “世界” */
+        }
+        re.lastIndex = 0; const m = re.exec(t);
+        if (m && m.index === 0) return map.get(m[0]);
+        const head = t.slice(0, 30), de = head.lastIndexOf('的');
+        if (de > 0 && !/^(他|她|它|祂)的/.test(t)) {
+          re.lastIndex = de + 1; const m3 = re.exec(t);
+          if (m3 && m3.index === de + 1 && !/[，,。！？]/.test(t.slice(0, de))) return map.get(m3[0]);
+        }
+        return null;
+      },
+      /* names that are not grammatical objects (对X / 向X / 和X …) */
+      subjects(s) { return this.all(s).filter(x => !/[对向朝给跟和与把被让替帮陪叫找见问看望]$/.test(s.slice(Math.max(0, x.at - 1), x.at))) },
+    };
+  }
+
+  /* ---------- look: stable colour + avatar per character ---------- */
+  /* 16 hues spread for distinctness, assigned by speaking rank; ranks beyond get a golden-angle hue
+     from a hash of the name. Only depends on the book text, so it is identical on every device. */
+  const HUES = [28, 210, 140, 330, 265, 85, 185, 5, 300, 160, 235, 55, 115, 350, 200, 245];
+  function hash(s) { let h = 2166136261; for (const ch of s) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619) >>> 0 } return h }
+  function look(c, i) {
+    const hue = i < HUES.length ? HUES[i] : Math.round((hash(c.id) * 137.508) % 360);
+    const glyph = [...c.name.replace(new RegExp('[' + DOT + ']', 'g'), '')][0] || '?';
+    const pattern = hash(c.id) % 4;     /* small avatar ornament so same-initial characters still differ */
+    return { hue, glyph, pattern };
+  }
+
+  /* ---------- pass 2: attribution ---------- */
+  function speakerFromText(s, cast, mode) {
+    /* mode 'pre': narration before a quote/colon, subject of its last sentence; 'post': clause after a quote */
+    if (mode === 'post') {
+      const qt = s.match(TITLE_RE);
+      const c = qt ? qt[0] + firstClause(s.slice(qt[0].length)) : firstClause(s);
+      if (!c) return null;
+      const verbNear = SPEECH_RE.test(c.slice(0, 16));
+      const id = cast.matcher.lead(c);
+      if (id) return { id, conf: verbNear ? 'explicit' : 'context' };   /* “…”克莱恩放下刀叉 */
+      if (!verbNear) return null;
+      const t = stripLead(c);
+      if (/^(他|她|它|祂)(?![们的])/.test(t)) return { id: null, pronoun: t[0], conf: 'inferred' };
+      const near = cast.matcher.all(c.slice(0, 12))[0];
+      return near ? { id: near.id, conf: 'explicit' } : null;
+    }
+    const sent = lastSentence(s.replace(/[：:]\s*$/, ''));
+    if (!sent) return null;
+    const verb = SPEECH_RE.test(sent.slice(-8));
+    /* walk clauses backwards from the speech verb: the nearest clause with a subject owns the verb */
+    const clauses = sent.split(/[，,]/);
+    for (let ci = clauses.length - 1; ci >= 0; ci--) {
+      const t = stripLead(clauses[ci].trim());
+      if (!t) continue;
+      const id = cast.matcher.lead(t);
+      if (id) return { id, conf: verb ? 'explicit' : 'context' };
+      if (/^(他|她|它|祂)(?![们的])/.test(t)) return { id: null, pronoun: t[0], conf: 'inferred' };
+      if (PRONOUN_RE.test(t) && !/^(他|她|它|祂)的/.test(t)) return null;
+    }
+    const any = cast.matcher.subjects(sent);
+    if (any.length && verb) return { id: any[any.length - 1].id, conf: 'inferred' };
+    return null;
+  }
+
+  /* subject (lead name) of each clause in a narration chunk; pronoun-led clauses keep the previous subject */
+  function subjectsOf(text, cast) {
+    const out = [];
+    for (const sent of text.split(/[。！？!?…；;：:]/)) {
+      const cl = sent.split(/[，,]/)[0];
+      const t = stripLead((cl || '').trim());
+      if (!t) continue;
+      const id = cast.matcher.lead(t);
+      if (id) out.push(id);
+    }
+    return out;
+  }
+  /* chapter: {paras:[...]}. prevTail carries recent speakers across chapter boundaries. */
+  function attributeChapter(chapter, cast, prevTail) {
+    const out = [];
+    let recent = prevTail ? prevTail.recent.slice() : [];          /* last speakers, newest first */
+    let lastMention = prevTail ? prevTail.lastMention : null;       /* last named character in narration */
+    let lastSubject = prevTail ? prevTail.lastSubject : null;       /* last cast member acting as a sentence subject */
+    let shortRun = prevTail ? prevTail.shortRun : 0;                /* consecutive short quote-only turns */
+    let lastWasDialogue = prevTail ? prevTail.lastWasDialogue : false;
+    const paras = chapter.paras;
+    const push = id => { if (!id) return; recent = [id, ...recent.filter(x => x !== id)].slice(0, 4) };
+    for (let i = 0; i < paras.length; i++) {
+      const p = paras[i], prev = i ? paras[i - 1] : '';
+      const prevColon = /[：:]$/.test(prev);
+      const segs = segment(p, prevColon);
+      let paraSpeaker = null, sawQuote = false, narrSinceQuote = '';
+      for (let k = 0; k < segs.length; k++) {
+        const s = segs[k];
+        if (s.t === 'n') {
+          narrSinceQuote += s.text;
+          const ms = cast.matcher.all(s.text);
+          if (ms.length) lastMention = ms[ms.length - 1].id;
+          for (const sub of subjectsOf(s.text, cast)) if (sub !== undefined) lastSubject = sub;
+          continue;
+        }
+        if (!s.spoken) continue;
+        let r = null;
+        const before = k > 0 && segs[k - 1].t === 'n' ? segs[k - 1].text : '';
+        const after = k + 1 < segs.length && segs[k + 1].t === 'n' ? segs[k + 1].text : '';
+        if (before.trim()) r = speakerFromText(before, cast, 'pre');
+        if ((!r || r.conf === 'inferred') && after.trim()) { const r2 = speakerFromText(after, cast, 'post'); if (r2 && (r2.id || !r)) r = r2 }
+        if (!r && k === 0 && prevColon) r = speakerFromText(prev, cast, 'pre');
+        if (!r && sawQuote && paraSpeaker && !narrSinceQuote.trim()) r = { id: paraSpeaker, conf: 'context' };
+        if (!r && sawQuote && paraSpeaker) r = { id: paraSpeaker, conf: 'context' };
+        if (r && !r.id && r.pronoun) {
+          /* 他/她: the last character who acted as a sentence subject (not merely mentioned) */
+          r = lastSubject ? { id: lastSubject, conf: 'inferred' } : null;
+        }
+        if (!r && k === 0 && segs.length === 1 && lastWasDialogue && shortRun >= 2 && s.text.length <= 30 &&
+            recent.length >= 2 && recent[0] !== recent[1]) {
+          r = { id: recent[1], conf: 'inferred' };                 /* quick A, B, A … exchange */
+        }
+        if (!r && k === 0 && prev && !prevColon && !/[”」』]$/.test(prev)) {
+          const clauses = lastSentence(prev).split(/[，,]/);
+          const lead = cast.matcher.lead(stripLead((clauses[clauses.length - 1] || '').trim()));
+          if (lead) r = { id: lead, conf: 'inferred' };            /* actor of the previous beat */
+        }
+        if (r && r.id) { s.speaker = r.id; s.conf = r.conf; push(r.id); paraSpeaker = r.id }
+        else { s.speaker = null; s.conf = null }
+        sawQuote = true; narrSinceQuote = '';
+      }
+      const hasDialogue = segs.some(s => s.t === 'q' && s.spoken);
+      const narrOnly = !hasDialogue;
+      if (narrOnly && p.length > 60) recent = recent.slice(0, 2);  /* long narration loosens turn-taking */
+      lastWasDialogue = hasDialogue && segs.every(s => s.t === 'q' || !s.text.trim() || s.text.length < 30);
+      const quoteOnly = segs.length === 1 && segs[0].t === 'q' && segs[0].spoken;
+      shortRun = quoteOnly && segs[0].text.length <= 30 ? shortRun + 1 : (hasDialogue && segs[0].t === 'q' && segs.every(x => x.t === 'q' || x.text.length < 30) ? 1 : 0);
+      out.push(segs);
+    }
+    return { paras: out, tail: { recent, lastMention, lastSubject, shortRun, lastWasDialogue } };
+  }
+
+  const api = { VERSION, segment, buildCast, attributeChapter, makeMatcher, parseWords };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.Dialogue = api;
+})(typeof window !== 'undefined' ? window : globalThis);

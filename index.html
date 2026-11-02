@@ -98,6 +98,66 @@ main p.empty{text-align:center;text-indent:0;color:var(--muted)}
 #progress{position:fixed;left:0;bottom:0;height:3px;background:var(--accent);z-index:6;width:0}
 @media (max-width:600px){main{padding-top:16px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* ---------- dialogue bubbles ----------
+   Each character has a fixed hue (--h) assigned from the book itself; lightness/chroma
+   tokens below adapt it to the paper colour so bubbles read well in every theme. */
+:root{--av-l:.60;--av-c:.13;--nm-l:.44;--bub-mix:11%;--bub-line:30%}
+@media (prefers-color-scheme: dark){:root{--av-l:.64;--av-c:.11;--nm-l:.80;--bub-mix:17%;--bub-line:38%}}
+body.t-light,body.t-sepia,body.t-green{--av-l:.60;--av-c:.13;--nm-l:.44;--bub-mix:11%;--bub-line:30%}
+body.t-dark{--av-l:.64;--av-c:.11;--nm-l:.80;--bub-mix:17%;--bub-line:38%}
+.dl-row{display:flex;gap:10px;align-items:flex-start;margin:0 0 .85em}
+.dl-row+.dl-row{margin-top:-.25em}
+.av{flex:none;width:34px;height:34px;margin-top:2px;display:grid;place-items:center;border:0;padding:0;cursor:pointer;
+  border-radius:50%;background:oklch(var(--av-l) var(--av-c) var(--h));color:#fff;font:600 15px/1 var(--serif);position:relative;
+  text-shadow:0 1px 1px #0003}
+.av.p1{border-radius:10px}
+.av.p2{box-shadow:inset 0 0 0 2px #fff8,inset 0 0 0 4px oklch(var(--av-l) var(--av-c) var(--h))}
+.av.p3::after{content:"";position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;
+  background:oklch(var(--nm-l) var(--av-c) var(--h));border:2px solid var(--bg)}
+.dl-col{min-width:0;flex:1;display:flex;flex-direction:column;align-items:flex-start;gap:3px}
+.dl-who{font:12px/1.4 var(--ui);color:oklch(var(--nm-l) .12 var(--h));display:flex;gap:6px;align-items:baseline;background:none;border:0;padding:0;cursor:pointer}
+.dl-who .cf{color:var(--muted);font-size:11px}
+.dl-bub{background:color-mix(in oklab,oklch(var(--av-l) var(--av-c) var(--h)) var(--bub-mix),var(--bg));
+  border:1px solid color-mix(in oklab,oklch(var(--av-l) var(--av-c) var(--h)) var(--bub-line),var(--bg));
+  border-radius:4px 14px 14px 14px;padding:.4em .8em;max-width:100%;text-align:left;overflow-wrap:anywhere}
+.dl-row.inf .dl-bub{border-style:dashed}
+.dl-tag{font-size:.84em;color:var(--muted);line-height:1.6;padding:0 .2em}
+.dl-row.unk .av{background:var(--line);color:var(--muted);text-shadow:none}
+.dl-row.unk .dl-who{color:var(--muted)}
+.dl-row.unk .dl-bub{background:var(--panel);border-color:var(--line)}
+.dlg.para{margin:0 0 .8em}
+/* switch */
+.switch{position:relative;width:44px;height:26px;flex:none}
+.switch input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.switch span{position:absolute;inset:0;border-radius:13px;background:var(--line);transition:background .2s;pointer-events:none}
+.switch span::after{content:"";position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:var(--bg);box-shadow:0 1px 2px #0003;transition:transform .2s}
+.switch input:checked+span{background:var(--accent)}
+.switch input:checked+span::after{transform:translateX(18px)}
+.switch input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+#settings .note{font-size:12px;color:var(--muted);margin:-4px 0 8px}
+/* sheet: speaker picker + cast manager */
+#sheet{position:fixed;z-index:40;left:50%;top:50%;transform:translate(-50%,-50%);width:min(440px,calc(100vw - 32px));max-height:min(640px,calc(100vh - 48px));
+  display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px #0004;font-family:var(--ui);font-size:14px}
+#sheet header{padding:14px 16px 10px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+#sheet h3{margin:0;font-size:16px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+#sheet .quote{color:var(--muted);font-family:var(--serif);font-size:13px;line-height:1.5;max-height:3em;overflow:hidden}
+#sheet .scope{display:flex;gap:6px;flex-wrap:wrap}
+#sheet .scope label{display:flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;cursor:pointer;font-size:13px}
+#sheet .scope input{accent-color:var(--accent);margin:0}
+#sheetSearch{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+#sheetList{overflow:auto;flex:1;padding:6px 0;overscroll-behavior:contain}
+.pick{display:flex;align-items:center;gap:10px;width:100%;padding:7px 16px;background:none;border:0;text-align:left;cursor:pointer;font:inherit;color:inherit}
+.pick:hover,.pick:focus-visible{background:var(--line)}
+.pick .av{width:30px;height:30px;font-size:13px;pointer-events:none}
+.pick .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick .meta{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pick.cur{background:color-mix(in oklab,var(--accent) 14%,transparent)}
+.pick.hidden-c .nm{text-decoration:line-through;color:var(--muted)}
+.pick .acts{display:flex;gap:6px}
+.pick .acts .btn{min-height:28px;padding:3px 8px;font-size:12px}
+#sheet footer{padding:10px 16px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;align-items:center;color:var(--muted);font-size:12px}
+@media (max-width:600px){#sheet{left:0;right:0;top:auto;bottom:0;transform:none;width:auto;max-height:78vh;border-radius:16px 16px 0 0;padding-bottom:env(safe-area-inset-bottom,0px)}}
 </style>
 </head>
 <body>
@@ -126,6 +186,9 @@ main p.empty{text-align:center;text-indent:0;color:var(--muted)}
     <option value="sans">黑体 / 无衬线</option>
     <option value="kai">楷体</option>
   </select></div>
+  <div class="row"><label for="dlgOn">对话气泡</label><span class="switch"><input type="checkbox" id="dlgOn" role="switch"><span></span></span></div>
+  <div class="note" id="dlgNote">用颜色和头像区分说话的角色（实验功能）</div>
+  <div class="row" id="castRow" hidden>角色 <button class="btn" id="castBtn">管理角色</button></div>
   <div class="row">主题
     <span class="swatches">
       <button class="swatch auto" data-theme="auto" title="跟随系统"></button>
@@ -137,6 +200,7 @@ main p.empty{text-align:center;text-indent:0;color:var(--muted)}
 </div>
 
 <main id="main"></main>
+<div id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden></div>
 <div id="toast" role="status" hidden><span id="toastMsg"></span><button class="btn act" id="toastAct" hidden></button><button class="btn" id="toastX" aria-label="关闭">✕</button></div>
 
 <script>
@@ -146,13 +210,15 @@ const store={get(k,d){try{const v=localStorage.getItem('nr_'+k);return v==null?d
              set(k,v){try{localStorage.setItem('nr_'+k,JSON.stringify(v))}catch(e){}}};
 
 /* ---------- IndexedDB: keep the last book so reopening needs no re-pick ---------- */
-function idb(){return new Promise((res,rej)=>{try{const r=indexedDB.open('novelReader',1);r.onupgradeneeded=()=>r.result.createObjectStore('books');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}})}
+function idb(){return new Promise((res,rej)=>{try{const r=indexedDB.open('novelReader',2);r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains('books'))d.createObjectStore('books');if(!d.objectStoreNames.contains('cast'))d.createObjectStore('cast')};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}})}
+async function idbGet(st,k){try{const db=await idb();return await new Promise(r=>{const q=db.transaction(st).objectStore(st).get(k);q.onsuccess=()=>r(q.result||null);q.onerror=()=>r(null)})}catch(e){return null}}
+async function idbPut(st,k,v){try{const db=await idb();db.transaction(st,'readwrite').objectStore(st).put(v,k)}catch(e){}}
 async function saveBook(name,buf){try{const db=await idb();db.transaction('books','readwrite').objectStore('books').put({name,buf},'last')}catch(e){}}
 async function loadBook(){try{const db=await idb();return await new Promise(r=>{const q=db.transaction('books').objectStore('books').get('last');q.onsuccess=()=>r(q.result);q.onerror=()=>r(null)})}catch(e){return null}}
 
 /* ---------- settings ---------- */
 const FONTS={serif:'var(--serif)',sans:'var(--ui)',kai:'"Kaiti SC","STKaiti","KaiTi","BiauKai",var(--serif)'};
-const S=Object.assign({fs:innerWidth<600?19:20,lh:1.9,w:40,theme:'auto',font:'serif'},store.get('settings',{}));
+const S=Object.assign({fs:innerWidth<600?19:20,lh:1.9,w:40,theme:'auto',font:'serif',dialogue:false},store.get('settings',{}));
 if(!FONTS[S.font])S.font='serif';
 function applySettings(){
   const r=document.documentElement.style;
@@ -161,6 +227,7 @@ function applySettings(){
   document.body.className=S.theme==='auto'?'':'t-'+S.theme;
   requestAnimationFrame(()=>{const m=document.getElementById('themeColor');if(m)m.content=getComputedStyle(document.body).getPropertyValue('--panel').trim()||'#eeeae1'});
   document.querySelectorAll('.swatch').forEach(s=>s.setAttribute('aria-pressed',s.dataset.theme===S.theme));
+  $('#dlgOn').checked=!!S.dialogue;$('#castRow').hidden=!S.dialogue;
   $('#fsVal').textContent=S.fs;$('#lh').value=S.lh;$('#w').value=S.w;$('#font').value=S.font;
   store.set('settings',S);
 }
@@ -255,12 +322,12 @@ function render(i,p){
   if(!book)return;
   idx=Math.max(0,Math.min(book.chapters.length-1,i));
   const c=book.chapters[idx];
-  const body=c.paras.map(l=>`<p>${esc(l)}</p>`).join('');
+  const body=dlgReady()?renderDialogue(idx,c):c.paras.map(l=>`<p class="para">${esc(l)}</p>`).join('');
   $('#main').innerHTML=`<h2>${esc(c.title)}</h2><div id="text">${body||'<p class="empty">（本卷开始）</p>'}</div>
     <div class="nav"><button class="btn" id="prev" ${idx?'':'disabled'}>← 上一章</button>
     <button class="btn" id="next" ${idx<book.chapters.length-1?'':'disabled'}>下一章 →</button></div>
     <div class="hint">第 ${idx+1} / ${book.chapters.length} 节 · 本章结束时全书 <span id="endPct"></span>${isTouch?' · 左右滑动切换章节':' · ← → 切换章节 · T 打开目录'}</div>`;
-  paraEls=c.paras.length?[...document.querySelectorAll('#text p')]:[];
+  paraEls=c.paras.length?[...document.querySelectorAll('#text > .para')]:[];
   $('#endPct').textContent=fmtPct((c.start+c.len)/book.total);
   $('#prev').onclick=()=>render(idx-1);$('#next').onclick=()=>render(idx+1);
   $('#barTitle').textContent=`${book.name} · ${c.title}`;
@@ -315,6 +382,202 @@ async function wake(){try{if(navigator.wakeLock&&document.visibilityState==='vis
 document.addEventListener('visibilitychange',()=>{if(!book)return;if(document.visibilityState==='visible'){wake();onResume()}else{saveProgress(true);flush()}});
 window.addEventListener('pagehide',()=>{saveProgress(true);flush()});
 
+/* ---------- Dialogue bubbles ----------
+   The cast (names, aliases, colours, avatars) is computed once per book from the text
+   in a Web Worker and cached in IndexedDB, so it is identical across chapters, reloads
+   and devices. Reader corrections are stored per book on top of it:
+     line:  {"ch:p:q": castId | ""}  one line's speaker ("" = not a known character)
+     merge: {castId: castId}          treat one entry as another everywhere (aliases)
+     hide:  {castId: true}            not a character; its lines show as unknown */
+const dlg={data:null,cast:null,busy:false,lib:null};
+function dlgReady(){return !!(S.dialogue&&book&&dlg.cast&&dlg.data&&dlg.data.bookId===book.id)}
+function loadDialogueLib(){
+  if(window.Dialogue)return Promise.resolve(window.Dialogue);
+  if(dlg.lib)return dlg.lib;
+  return dlg.lib=new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='dialogue.js';sc.onload=()=>res(window.Dialogue);sc.onerror=()=>{dlg.lib=null;rej(new Error('load'))};document.head.appendChild(sc)});
+}
+const fixes={
+  get(){return book?store.get('dlg_'+book.id,{line:{},merge:{},hide:{}}):{line:{},merge:{},hide:{}}},
+  set(v){if(book)store.set('dlg_'+book.id,v)},
+};
+function castById(id){return dlg.cast&&dlg.cast.byId.get(id)}
+/* final speaker after corrections: follows merges, drops hidden entries */
+function resolveSpeaker(id,f){
+  let seen=0;while(id&&f.merge[id]&&seen++<8)id=f.merge[id];
+  if(!id||f.hide[id]||!castById(id))return null;
+  return id;
+}
+async function ensureDialogue(){
+  if(!book||dlg.busy)return;
+  const D=await loadDialogueLib().catch(()=>null);
+  if(!D){toast('对话气泡加载失败，请检查网络后重试');return}
+  const key=book.id+':v'+D.VERSION;
+  let data=await idbGet('cast',key);
+  if(!data){
+    dlg.busy=true;const forBook=book.id;
+    toast('正在分析这本书里的角色…（仅首次，需要几秒）');
+    data=await new Promise(resolve=>{
+      const chapters=book.chapters.map(c=>({paras:c.paras}));
+      try{
+        const w=new Worker('dialogue-worker.js');
+        w.onmessage=e=>{w.terminate();resolve(e.data.ok?e.data:null)};
+        w.onerror=()=>{w.terminate();resolve(null)};
+        w.postMessage({chapters});
+      }catch(e){resolve(null)}
+    });
+    if(!data){                                           /* no worker support: run here */
+      try{
+        let words;try{words=D.parseWords(await (await fetch('dialogue-words.txt')).text())}catch(e){}
+        const chs=book.chapters.map(c=>({paras:c.paras}));const cast=D.buildCast(chs,{words});
+        const tails=[];let tail=null;for(const ch of chs){tails.push(tail);tail=D.attributeChapter(ch,cast,tail).tail}
+        data={ok:true,list:cast.list,tails};
+      }catch(e){data=null}
+    }
+    dlg.busy=false;
+    if(!book||book.id!==forBook)return;
+    if(!data){toast('角色分析失败，已保持普通排版');return}
+    data={bookId:book.id,list:data.list,tails:data.tails};
+    idbPut('cast',key,data);
+    hideToast();
+  }
+  dlg.data=data;
+  const byId=new Map(data.list.map(c=>[c.id,c]));
+  dlg.cast={list:data.list,byId,matcher:D.makeMatcher(data.list)};
+  if(S.dialogue){const pos=curPos();render(pos.ch,pos.p)}
+}
+function avHTML(c,extra=''){
+  if(!c)return `<span class="av ${extra}" aria-hidden="true">?</span>`;
+  return `<span class="av p${c.pattern} ${extra}" style="--h:${c.hue}" aria-hidden="true">${esc(c.glyph)}</span>`;
+}
+function renderDialogue(ci,c){
+  const D=window.Dialogue,f=fixes.get();
+  const res=D.attributeChapter({paras:c.paras},dlg.cast,dlg.data.tails[ci]||null);
+  return res.paras.map((segs,pi)=>{
+    if(!segs.some(x=>x.t==='q'&&x.spoken))return `<p class="para">${esc(c.paras[pi])}</p>`;
+    /* group into runs: one row per consecutive speaker; narration stays in order as small tags */
+    const rows=[];let cur=null,pending=[],qi=0;
+    for(const sg of segs){
+      if(sg.t==='n'||!sg.spoken){
+        const txt=sg.t==='n'?sg.text:sg.open+sg.text+sg.close;
+        if(!txt.trim())continue;
+        if(cur)cur.items.push({tag:txt});else pending.push({tag:txt});
+        continue;
+      }
+      const key=ci+':'+pi+':'+qi;qi++;
+      const manual=Object.prototype.hasOwnProperty.call(f.line,key);
+      const raw=manual?(f.line[key]||null):sg.speaker;
+      const id=resolveSpeaker(raw,f);
+      const conf=manual?'manual':(id?sg.conf:null);
+      if(!cur||cur.id!==id){
+        /* narration between two different speakers belongs to the next one's lead-in */
+        if(cur&&cur.id!==id){const t=[];while(cur.items.length&&cur.items[cur.items.length-1].tag!==undefined)t.unshift(cur.items.pop());pending=t.concat(pending)}
+        cur={id,conf,key,items:pending.slice()};pending=[];rows.push(cur);
+      }
+      cur.items.push({q:sg.text,key});
+      if(conf==='inferred'&&cur.conf!=='inferred'&&cur.conf!=='manual')cur.conf=conf;
+    }
+    if(pending.length&&cur)cur.items.push(...pending);
+    const html=rows.map(r=>{
+      const ch=r.id?castById(r.id):null;
+      const label=ch?esc(ch.name):'未知';
+      const cf=r.conf==='inferred'?'<span class="cf">推测</span>':r.conf==='manual'?'<span class="cf">已修正</span>':'';
+      const body=r.items.map(it=>it.q!==undefined?`<div class="dl-bub">${esc(it.q)}</div>`:`<span class="dl-tag">${esc(it.tag)}</span>`).join('');
+      return `<div class="dl-row${ch?'':' unk'}${r.conf==='inferred'?' inf':''}"${ch?` style="--h:${ch.hue}"`:''}>
+        <button class="av${ch?' p'+ch.pattern:''}" data-fix="${r.key}" aria-label="更改说话人：${label}">${ch?esc(ch.glyph):'?'}</button>
+        <div class="dl-col"><button class="dl-who" data-fix="${r.key}">${label}${cf}</button>${body}</div></div>`;
+    }).join('');
+    return `<div class="para dlg">${html}</div>`;
+  }).join('');
+}
+/* toggle */
+$('#dlgOn').onchange=e=>{
+  const pos=holdPos();S.dialogue=e.target.checked;applySettings();
+  if(!book){heldPos=null;return}
+  if(S.dialogue&&!dlgReady()){heldPos=null;ensureDialogue();return}
+  render(pos?pos.ch:idx,pos?pos.p:0);heldPos=null;
+};
+
+/* ---------- sheet: speaker picker & cast manager ---------- */
+let sheetState=null;
+function openSheet(state){
+  sheetState=state;$('#sheet').hidden=false;$('#shade').hidden=false;
+  $('#settings').hidden=true;
+  drawSheet();
+  const inp=$('#sheetSearch');if(inp&&!isTouch)inp.focus();
+}
+function closeSheet(){sheetState=null;$('#sheet').hidden=true;if(!$('#toc').classList.contains('open'))$('#shade').hidden=true}
+function castRows(filter,f,opts={}){
+  const q=(filter||'').trim();
+  const list=dlg.cast.list.filter(c=>!f.merge[c.id]&&(opts.showHidden||!f.hide[c.id])&&(!q||c.name.includes(q)||(c.aliases||[]).some(a=>a.includes(q))));
+  return q?list:list.slice(0,opts.limit||60);
+}
+function drawSheet(){
+  const st=sheetState;if(!st)return;const f=fixes.get();const el=$('#sheet');
+  const search=st.q||'';
+  if(st.mode==='pick'){
+    const curC=st.current?castById(st.current):null;
+    const rows=castRows(search,f).map(c=>`<button class="pick${c.id===st.current?' cur':''}" data-id="${esc(c.id)}">${avHTML(c)}<span class="nm">${esc(c.name)}</span><span class="meta">${c.lines} 句</span></button>`).join('');
+    el.innerHTML=`<header><h3 id="sheetTitle">这句话是谁说的？<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3>
+      <div class="quote">${esc(st.quote||'')}</div>
+      ${curC?`<div class="scope"><label><input type="radio" name="scope" value="line" ${st.scope!=='all'?'checked':''}>只改这一句</label><label><input type="radio" name="scope" value="all" ${st.scope==='all'?'checked':''}>本书所有「${esc(curC.name)}」都改</label></div>`:''}
+      <input id="sheetSearch" placeholder="搜索角色…" value="${esc(search)}" autocomplete="off"></header>
+      <div id="sheetList">${rows||'<div class="pick"><span class="nm">没有匹配的角色</span></div>'}
+        <button class="pick" data-id=""><span class="av" aria-hidden="true">?</span><span class="nm">未知 / 不是这些角色</span></button></div>
+      <footer><span>修正只影响这本书，保存在这台设备上</span>${st.manual?'<button class="btn" id="sheetReset">恢复自动识别</button>':''}</footer>`;
+  }else{
+    const rows=castRows(search,f,{showHidden:true,limit:400}).map(c=>{
+      const merged=Object.keys(f.merge).filter(k=>f.merge[k]===c.id).map(k=>castById(k)).filter(Boolean).map(x=>x.name);
+      const al=[...(c.aliases||[]),...merged];
+      return `<div class="pick${f.hide[c.id]?' hidden-c':''}">${avHTML(c)}<span class="nm" title="${esc(al.join('、'))}">${esc(c.name)}${al.length?`<span class="meta"> · ${esc(al.slice(0,2).join('、'))}${al.length>2?'…':''}</span>`:''}</span><span class="meta">${c.lines} 句</span>
+        <span class="acts"><button class="btn" data-merge="${esc(c.id)}">合并到…</button><button class="btn" data-hide="${esc(c.id)}">${f.hide[c.id]?'恢复':'不是角色'}</button></span></div>`;
+    }).join('');
+    const n=Object.keys(f.line).length+Object.keys(f.merge).length+Object.keys(f.hide).length;
+    el.innerHTML=`<header><h3 id="sheetTitle">${st.mergeFrom?`把「${esc(castById(st.mergeFrom).name)}」合并到…`:'角色'}<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3>
+      ${st.mergeFrom?'<div class="quote">合并后，这本书里它的所有对话都算作所选角色，并使用所选角色的颜色和头像。</div>':`<div class="quote">按说话次数排列，共 ${dlg.cast.list.length} 个。颜色和头像由书本内容决定，所有章节、所有设备上都一致。</div>`}
+      <input id="sheetSearch" placeholder="搜索角色…" value="${esc(search)}" autocomplete="off"></header>
+      <div id="sheetList">${st.mergeFrom?castRows(search,f).filter(c=>c.id!==st.mergeFrom).map(c=>`<button class="pick" data-into="${esc(c.id)}">${avHTML(c)}<span class="nm">${esc(c.name)}</span><span class="meta">${c.lines} 句</span></button>`).join(''):rows}</div>
+      <footer><span>${n?`已有 ${n} 处修正`:'还没有修正'}</span>${n&&!st.mergeFrom?'<button class="btn" id="sheetResetAll">清除全部修正</button>':''}</footer>`;
+  }
+  $('#sheetX').onclick=closeSheet;
+  const inp=$('#sheetSearch');
+  inp.oninput=e=>{st.q=e.target.value;const pos=e.target.selectionStart;drawSheet();const i2=$('#sheetSearch');i2.focus();i2.setSelectionRange(pos,pos)};
+  el.querySelectorAll('input[name=scope]').forEach(r=>r.onchange=()=>{st.scope=r.value});
+  const reset=$('#sheetReset');if(reset)reset.onclick=()=>{const f2=fixes.get();delete f2.line[st.key];fixes.set(f2);closeSheet();rerender()};
+  const ra=$('#sheetResetAll');if(ra)ra.onclick=()=>{fixes.set({line:{},merge:{},hide:{}});drawSheet();rerender()};
+}
+$('#sheet').onclick=e=>{
+  const st=sheetState;if(!st)return;const f=fixes.get();
+  const pick=e.target.closest('[data-id]');
+  if(pick&&st.mode==='pick'){
+    const id=pick.dataset.id;
+    if(st.scope==='all'&&st.current){if(id&&id!==st.current)f.merge[st.current]=id;else if(!id)f.hide[st.current]=true}
+    else f.line[st.key]=id;
+    fixes.set(f);closeSheet();rerender();
+    toast(st.scope==='all'&&st.current?'已修改本书中所有相同角色的对话':'已修正这句话的说话人');
+    return;
+  }
+  const hide=e.target.closest('[data-hide]');
+  if(hide){const id=hide.dataset.hide;if(f.hide[id])delete f.hide[id];else f.hide[id]=true;fixes.set(f);drawSheet();rerender();return}
+  const mg=e.target.closest('[data-merge]');
+  if(mg){st.mergeFrom=mg.dataset.merge;st.q='';drawSheet();return}
+  const into=e.target.closest('[data-into]');
+  if(into&&st.mergeFrom){f.merge[st.mergeFrom]=into.dataset.into;fixes.set(f);st.mergeFrom=null;st.q='';drawSheet();rerender();return}
+};
+function rerender(){if(!book)return;const pos=curPos();render(pos.ch,pos.p)}
+$('#main').addEventListener('click',e=>{
+  const b=e.target.closest('[data-fix]');if(!b||!dlgReady())return;
+  const key=b.dataset.fix,[ci,pi,qi]=key.split(':').map(Number);
+  const D=window.Dialogue,f=fixes.get();
+  const res=D.attributeChapter({paras:book.chapters[ci].paras},dlg.cast,dlg.data.tails[ci]||null);
+  const spoken=res.paras[pi].filter(x=>x.t==='q'&&x.spoken);
+  const manual=Object.prototype.hasOwnProperty.call(f.line,key);
+  const current=resolveSpeaker(manual?f.line[key]:(spoken[qi]&&spoken[qi].speaker),f);
+  openSheet({mode:'pick',key,current,manual,quote:'“'+((spoken[qi]&&spoken[qi].text)||'')+'”',scope:'line',q:''});
+});
+$('#castBtn').onclick=e=>{e.stopPropagation();if(!dlgReady()){ensureDialogue();return}openSheet({mode:'cast',q:''})};
+$('#shade').addEventListener('click',()=>{if(sheetState)closeSheet()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&sheetState)closeSheet()});
+
 function buildToc(filter=''){
   const f=filter.trim();
   $('#tocList').innerHTML=book.chapters.map((c,i)=>(!f||c.title.includes(f))?
@@ -347,8 +610,10 @@ async function openBuffer(name,buf,persist){
   if(!rec&&legacy&&typeof legacy.idx==='number'){rec={ch:legacy.idx,p:0,t:legacy.t||0};delete all[name+':'+buf.byteLength];all[id]=rec;store.set('progress',all)}
   buildToc();
   $('#pct').hidden=false;
+  dlg.data=null;dlg.cast=null;
   render(rec?rec.ch:0,rec?rec.p:0);
   if(persist)saveBook(name,buf);
+  if(S.dialogue)ensureDialogue();
   wake();
   onBookOpened(rec||null);
 }
@@ -369,7 +634,7 @@ document.addEventListener('dragleave',()=>{const d=$('#drop');if(d)d.classList.r
 document.addEventListener('drop',e=>{e.preventDefault();openFile(e.dataTransfer.files[0])});
 
 document.addEventListener('keydown',e=>{
-  if(!book||e.target.tagName==='INPUT')return;
+  if(!book||e.target.tagName==='INPUT'||sheetState)return;
   if(e.key==='ArrowRight')render(idx+1);
   else if(e.key==='ArrowLeft')render(idx-1);
   else if(e.key==='t'||e.key==='T')toggleToc(!$('#toc').classList.contains('open'));

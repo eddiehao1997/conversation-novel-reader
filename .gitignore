@@ -1,3 +1,6 @@
 # 不要提交小说文件（GitHub Pages 是公开的）
 *.txt
 .DS_Store
+
+# 应用自带的词表需要提交
+!dialogue-words.txt
