@@ -1,0 +1,3 @@
+# 不要提交小说文件（GitHub Pages 是公开的）
+*.txt
+.DS_Store
