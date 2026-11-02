@@ -481,7 +481,9 @@ function renderDialogue(ci,c){
       const ch=r.id?castById(r.id):null;
       const label=ch?esc(ch.name):'未知';
       const cf=r.conf==='inferred'?'<span class="cf">推测</span>':r.conf==='manual'?'<span class="cf">已修正</span>':'';
-      const body=r.items.map(it=>it.q!==undefined?`<div class="dl-bub">${esc(it.q)}</div>`:`<span class="dl-tag">${esc(it.tag)}</span>`).join('');
+      /* adjacent narration pieces (split by an embedded “quoted term”) form one line */
+      const items=[];for(const it of r.items){const last=items[items.length-1];if(it.tag!==undefined&&last&&last.tag!==undefined)last.tag+=it.tag;else items.push({...it})}
+      const body=items.map(it=>it.q!==undefined?`<div class="dl-bub">${esc(it.q)}</div>`:`<span class="dl-tag">${esc(it.tag)}</span>`).join('');
       return `<div class="dl-row${ch?'':' unk'}${r.conf==='inferred'?' inf':''}"${ch?` style="--h:${ch.hue}"`:''}>
         <button class="av${ch?' p'+ch.pattern:''}" data-fix="${r.key}" aria-label="更改说话人：${label}">${ch?esc(ch.glyph):'?'}</button>
         <div class="dl-col"><button class="dl-who" data-fix="${r.key}">${label}${cf}</button>${body}</div></div>`;
