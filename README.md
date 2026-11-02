@@ -9,6 +9,7 @@
 - 离线可用：Service Worker 缓存应用本身，书存在本机的 IndexedDB 里
 - 电脑版 Chrome / Edge 安装后，可以把 .txt 文件直接拖进来或用「打开方式」打开
 - **同步的只有阅读位置**（章节、段落、百分比），书的内容不会上传
+- **对话气泡（实验功能）**：在设置里打开后，自动识别每句对话的说话人，用角色专属的颜色和头像显示成对话框，点头像可以修正。详见 [docs/dialogue-bubbles.md](docs/dialogue-bubbles.md)
 
 ## 文件结构
 
@@ -17,6 +18,9 @@ index.html             阅读器（页面、样式、脚本都在这一个文件
 config.js              Google OAuth Client ID（留空 = 不开同步，只用本机）
 manifest.webmanifest   PWA 配置（名称、图标、全屏模式、.txt 文件关联）
 sw.js                  Service Worker（离线缓存）
+dialogue.js            对话气泡引擎：识别角色、判断说话人（纯本地）
+dialogue-worker.js     在后台线程分析整本书
+dialogue-words.txt     常用词表（来自 jieba 词典，MIT 许可），用来排除非人名
 icons/                 应用图标
 .nojekyll              让 GitHub Pages 原样发布这些文件
 ```
