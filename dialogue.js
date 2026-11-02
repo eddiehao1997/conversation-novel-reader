@@ -19,7 +19,7 @@
  */
 (function (root) {
   'use strict';
-  const VERSION = 1;
+  const VERSION = 2;
   const HAN = '\\u3400-\\u9fff';
   const DOT = '·•‧・';
   const SPEECH = '说道|问道|答道|笑道|叹道|喝道|叫道|喊道|骂道|回道|应道|回答道|开口道|出声道|低声道|轻声道|沉声道|冷声道|厉声道|柔声道|' +
@@ -299,6 +299,52 @@
     return null;
   }
 
+  /* ---------- inner monologue ----------
+     The book writes thoughts unquoted, then tags them:
+       对！一定是队长赶到附近了！他心中一喜，…      无耻！…！克莱恩不由在心里腹诽了两句。
+       我知道了未来的方向……她愉快地在心里补充了一句。
+       克莱恩心想：这简直太好了！
+     A thought is the text before a ……/？/！ (or 。 when it speaks in the first person)
+     whose next clause has a person as subject and a thinking word soon after. */
+  const THINK = '思绪|心念|心想|暗想|心道|暗道|想道|腹诽|吐槽|自语|暗忖|嘀咕|在心里|心里|心中|内心|暗自|默默|无声|念头|想着|琢磨|自嘲|暗叹|暗骂|思索|心头|心底|于心';
+  const THINK_TAG_RE = new RegExp('^([^，。“”？！…：:；]{1,16}?)(?:' + THINK + ')');
+  const THINK_AFTER_RE = new RegExp('(' + THINK + ')(?:了一?句|地|道)?[：:]\\s*$');
+  /* split a narration chunk into [{t:'th', text, who}|{t:'n', text}] */
+  function splitThoughts(text, cast) {
+    const out = [];
+    /* X心想：<thought> */
+    const colon = text.match(/^(.{1,30}?(?:心想|暗想|心道|暗道|想道|在心里说|心里说))[：:]\s*(.{2,})$/);
+    if (colon && !/[“”]/.test(colon[2])) {
+      const who = subjectOfClause(colon[1], cast);
+      if (who) return [{ t: 'n', text: colon[1] + '：' }, { t: 'th', text: colon[2], who }, { colon: true }];
+    }
+    const sepRe = /……|[？！?!。]/g;
+    let m;
+    while ((m = sepRe.exec(text))) {
+      const end = m.index + m[0].length;
+      if (end < 2 || end > 320) continue;
+      const head = text.slice(0, end), tail = text.slice(end);
+      const tm = tail.match(THINK_TAG_RE);
+      if (!tm) continue;
+      if (m[0] === '。' && !/[我咱]/.test(head)) continue;          /* plain narration sentence */
+      if (/^[，,]/.test(tail)) continue;
+      if ((head.match(/[\u3400-\u9fff]/g) || []).length < 2) continue;
+      const who = subjectOfClause(tm[1], cast);
+      if (!who) continue;
+      out.push({ t: 'th', text: head, who });
+      out.push({ t: 'n', text: tail });
+      return out;
+    }
+    return null;
+  }
+  /* the person a clause starts with: a cast name, or a pronoun ('他'/'她'/'祂') */
+  function subjectOfClause(cl, cast) {
+    const t = stripLead(cl.trim()).replace(/^(?:不由|忍不住|顿时|立刻|当即)/, '');
+    const id = cast.matcher.lead(t);
+    if (id) return { id };
+    const pm = t.match(/^(他|她|祂)(?![们的])/);
+    return pm ? { pronoun: pm[1] } : null;
+  }
   /* subject (lead name) of each clause in a narration chunk; pronoun-led clauses keep the previous subject */
   function subjectsOf(text, cast) {
     const out = [];
@@ -324,10 +370,33 @@
     for (let i = 0; i < paras.length; i++) {
       const p = paras[i], prev = i ? paras[i - 1] : '';
       const prevColon = /[：:]$/.test(prev);
-      const segs = segment(p, prevColon);
+      let segs = segment(p, prevColon);
+      if (!(segs[0] && segs[0].t === 'q' && segs[0].spoken)) {
+        /* a paragraph that opens with narration may open with an unquoted thought; quoted terms inside it stay part of it */
+        let cut = p.length, pos = 0;
+        for (const sg of segs) {
+          const len = sg.t === 'q' ? sg.text.length + 2 : sg.text.length;
+          if (sg.t === 'q' && sg.spoken) { cut = pos; break }
+          pos += len;
+        }
+        const th = splitThoughts(p.slice(0, cut), cast);
+        if (th && th[0].t === 'th') {
+          const head = th[0].text;
+          segs = [th[0], ...segment(p.slice(head.length), false)];
+        } else if (th && th[2] && th[2].colon) {
+          segs = [th[0], th[1], ...segment(p.slice(cut), false)];
+        }
+      }
       let paraSpeaker = null, sawQuote = false, narrSinceQuote = '';
       for (let k = 0; k < segs.length; k++) {
         const s = segs[k];
+        if (s.t === 'th') {
+          let id = s.who.id || null, conf = id ? 'explicit' : 'inferred';
+          if (!id) id = lastSubject || recent[0] || null;
+          s.speaker = id; s.conf = id ? conf : null; delete s.who;
+          if (id) lastSubject = id;
+          continue;
+        }
         if (s.t === 'n') {
           narrSinceQuote += s.text;
           const ms = cast.matcher.all(s.text);

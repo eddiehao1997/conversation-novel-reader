@@ -122,6 +122,10 @@ body.t-dark{--av-l:.64;--av-c:.11;--nm-l:.80;--bub-mix:17%;--bub-line:38%}
   border:1px solid color-mix(in oklab,oklch(var(--av-l) var(--av-c) var(--h)) var(--bub-line),var(--bg));
   border-radius:4px 14px 14px 14px;padding:.4em .8em;max-width:100%;text-align:left;overflow-wrap:anywhere}
 .dl-row.inf .dl-bub{border-style:dashed}
+/* inner monologue: rounder, lighter, dotted outline, so thought never reads as speech */
+.dl-row .dl-bub.th{border-radius:16px;border-style:dotted;border-width:2px;background:color-mix(in oklab,oklch(var(--av-l) var(--av-c) var(--h)) 5%,var(--bg));color:color-mix(in oklab,var(--fg) 82%,var(--bg))}
+.dl-row.unk .dl-bub.th{background:transparent}
+.dl-bub.th::before{content:"心想 · ";font:11px/1 var(--ui);color:var(--muted);letter-spacing:.05em}
 .dl-tag{font-size:.84em;color:var(--muted);line-height:1.6;padding:0 .2em}
 .dl-row.unk .av{background:var(--line);color:var(--muted);text-shadow:none}
 .dl-row.unk .dl-who{color:var(--muted)}
@@ -187,7 +191,7 @@ body.t-dark{--av-l:.64;--av-c:.11;--nm-l:.80;--bub-mix:17%;--bub-line:38%}
     <option value="kai">楷体</option>
   </select></div>
   <div class="row"><label for="dlgOn">对话气泡</label><span class="switch"><input type="checkbox" id="dlgOn" role="switch"><span></span></span></div>
-  <div class="note" id="dlgNote">用颜色和头像区分说话的角色（实验功能）</div>
+  <div class="note" id="dlgNote">用颜色和头像区分说话的角色，点线框为心理活动（实验功能）</div>
   <div class="row" id="castRow" hidden>角色 <button class="btn" id="castBtn">管理角色</button></div>
   <div class="row">主题
     <span class="swatches">
@@ -445,6 +449,8 @@ async function ensureDialogue(){
   dlg.cast={list:data.list,byId,matcher:D.makeMatcher(data.list)};
   if(S.dialogue){const pos=curPos();render(pos.ch,pos.p)}
 }
+/* a line shown as a bubble: spoken dialogue or inner monologue */
+function isLine(x){return (x.t==='q'&&x.spoken)||x.t==='th'}
 function avHTML(c,extra=''){
   if(!c)return `<span class="av ${extra}" aria-hidden="true">?</span>`;
   return `<span class="av p${c.pattern} ${extra}" style="--h:${c.hue}" aria-hidden="true">${esc(c.glyph)}</span>`;
@@ -453,11 +459,11 @@ function renderDialogue(ci,c){
   const D=window.Dialogue,f=fixes.get();
   const res=D.attributeChapter({paras:c.paras},dlg.cast,dlg.data.tails[ci]||null);
   return res.paras.map((segs,pi)=>{
-    if(!segs.some(x=>x.t==='q'&&x.spoken))return `<p class="para">${esc(c.paras[pi])}</p>`;
+    if(!segs.some(isLine))return `<p class="para">${esc(c.paras[pi])}</p>`;
     /* group into runs: one row per consecutive speaker; narration stays in order as small tags */
     const rows=[];let cur=null,pending=[],qi=0;
     for(const sg of segs){
-      if(sg.t==='n'||!sg.spoken){
+      if(!isLine(sg)){
         const txt=sg.t==='n'?sg.text:sg.open+sg.text+sg.close;
         if(!txt.trim())continue;
         if(cur)cur.items.push({tag:txt});else pending.push({tag:txt});
@@ -473,7 +479,7 @@ function renderDialogue(ci,c){
         if(cur&&cur.id!==id){const t=[];while(cur.items.length&&cur.items[cur.items.length-1].tag!==undefined)t.unshift(cur.items.pop());pending=t.concat(pending)}
         cur={id,conf,key,items:pending.slice()};pending=[];rows.push(cur);
       }
-      cur.items.push({q:sg.text,key});
+      cur.items.push({q:sg.text,key,th:sg.t==='th'});
       if(conf==='inferred'&&cur.conf!=='inferred'&&cur.conf!=='manual')cur.conf=conf;
     }
     if(pending.length&&cur)cur.items.push(...pending);
@@ -483,7 +489,7 @@ function renderDialogue(ci,c){
       const cf=r.conf==='inferred'?'<span class="cf">推测</span>':r.conf==='manual'?'<span class="cf">已修正</span>':'';
       /* adjacent narration pieces (split by an embedded “quoted term”) form one line */
       const items=[];for(const it of r.items){const last=items[items.length-1];if(it.tag!==undefined&&last&&last.tag!==undefined)last.tag+=it.tag;else items.push({...it})}
-      const body=items.map(it=>it.q!==undefined?`<div class="dl-bub">${esc(it.q)}</div>`:`<span class="dl-tag">${esc(it.tag)}</span>`).join('');
+      const body=items.map(it=>it.q!==undefined?`<div class="dl-bub${it.th?' th':''}">${esc(it.q)}</div>`:`<span class="dl-tag">${esc(it.tag)}</span>`).join('');
       return `<div class="dl-row${ch?'':' unk'}${r.conf==='inferred'?' inf':''}"${ch?` style="--h:${ch.hue}"`:''}>
         <button class="av${ch?' p'+ch.pattern:''}" data-fix="${r.key}" aria-label="更改说话人：${label}">${ch?esc(ch.glyph):'?'}</button>
         <div class="dl-col"><button class="dl-who" data-fix="${r.key}">${label}${cf}</button>${body}</div></div>`;
@@ -571,7 +577,7 @@ $('#main').addEventListener('click',e=>{
   const key=b.dataset.fix,[ci,pi,qi]=key.split(':').map(Number);
   const D=window.Dialogue,f=fixes.get();
   const res=D.attributeChapter({paras:book.chapters[ci].paras},dlg.cast,dlg.data.tails[ci]||null);
-  const spoken=res.paras[pi].filter(x=>x.t==='q'&&x.spoken);
+  const spoken=res.paras[pi].filter(isLine);
   const manual=Object.prototype.hasOwnProperty.call(f.line,key);
   const current=resolveSpeaker(manual?f.line[key]:(spoken[qi]&&spoken[qi].speaker),f);
   openSheet({mode:'pick',key,current,manual,quote:'“'+((spoken[qi]&&spoken[qi].text)||'')+'”',scope:'line',q:''});
