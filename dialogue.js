@@ -19,7 +19,7 @@
  */
 (function (root) {
   'use strict';
-  const VERSION = 2;
+  const VERSION = 4;
   const HAN = '\\u3400-\\u9fff';
   const DOT = '·•‧・';
   const SPEECH = '说道|问道|答道|笑道|叹道|喝道|叫道|喊道|骂道|回道|应道|回答道|开口道|出声道|低声道|轻声道|沉声道|冷声道|厉声道|柔声道|' +
@@ -58,6 +58,8 @@
   }
   /* common characters that start clauses but are never a one-character name */
   const SINGLE_STOP = '祂他她它我你您这那就又也还都便只但而可在是有没不很再才却则且并即已正将把被让给对向从朝往和与跟同及或若如虽因所以为了的地得着过一二三四五六七八九十几两个些每各某其此该何谁什么怎么哪多少大小老新旧上下左右前后里外中内东西南北见看听说问答想觉知道笑哭叫喊走跑坐站拿放打开关吃喝睡醒抬低点摇伸收转回进出来去到起落用以于至自当随沿顺按据趁凭靠替为由经等似像如同比更最太极非真实好坏高矮长短快慢早晚先后刚才曾已经正在马上立刻忽然突然渐渐慢慢轻轻静静默默悄悄偷偷心眼手脚头脸嘴身声音气光影门窗墙桌椅床车船街路房屋人物事情话语字句书信纸笔衣帽鞋袜钱金银铜铁石木水火土风雨雪云天地日月星时分秒年月日夜晨昏今昨明';
+  /* clauses that set the scene for someone else's action: 等到X…，他… / 不等X开口，他… */
+  const SUBORD_RE = /^(?:等到|不等|没等|待到|直到|等|见到|见|看到|看见|听到|听见|发现|察觉|注意到|随着|面对|对于|因为|由于|趁着?|当)/;
   const TITLE_RE = /^[“「『]([\u3400-\u9fff]{1,6})[”」』](?=[\u3400-\u9fff])/;
   const QUOTE_RE = /[“「『]([^”」』]*)[”」』]/g;
   const END_PUNCT = /[。？！?!…—~～，,、；;）)]$/;
@@ -80,6 +82,9 @@
 
   /* Split a paragraph into ordered segments: {t:'n', text} narration, {t:'q', text, spoken} quote */
   function segment(p, prevEndsColon) {
+    /* multi-paragraph speech: every paragraph opens with “ and only the last one closes it.
+       A paragraph that opens a quote it never closes is speech to its end. */
+    if (isOpenSpeech(p)) return [{ t: 'q', text: p.slice(1), open: p[0], close: '', spoken: true, open_run: true }];
     const segs = []; let last = 0, m, anySpoken = false;
     QUOTE_RE.lastIndex = 0;
     while ((m = QUOTE_RE.exec(p))) {
@@ -98,6 +103,12 @@
     }
     if (last < p.length) segs.push({ t: 'n', text: p.slice(last) });
     return segs;
+  }
+
+  function isOpenSpeech(p) {
+    if (!/^[“「『]/.test(p)) return false;
+    const o = (p.match(/[“「『]/g) || []).length, c = (p.match(/[”」』]/g) || []).length;
+    return o > c;
   }
 
   /* ---------- pass 1: cast ---------- */
@@ -154,10 +165,10 @@
     /* right-branching: a name is followed by many different characters */
     const min = opts.minCount || 4;
     const words = opts.words || { all: new Set(), verbish: new Set() };
+    const prefixWord = w => w.length >= 3 && !DOT.split('').some(d => w.includes(d)) && (words.all.has(w.slice(0, 2)) || STOP.has(w.slice(0, 2)));
     const isWord = w => STOP.has(w) || words.all.has(w) ||
-      (w.length >= 3 && !DOT.split('').some(d => w.includes(d)) && (words.all.has(w.slice(0, 2)) || STOP.has(w.slice(0, 2)))) ||
       /^(边|一边|用|以|于|却|是|忙|好|半|低|慢|轻|嘴|语|嗓|眸|眼|面朝|下意识|笑容|握|环视|双手|小心|颇|具现|勾勒|拔|轻敲|侧|未|略|穿|笑呵呵|自言自语|金发|黑发|黄发|棕发|红发|白发)/.test(w);
-    let cands = [], singles = [];
+    let cands = [], singles = [], borderline = [];
     for (const [w, c] of cnt) {
       if (w.length === 1) {
         if (c < 15 || SINGLE_STOP.includes(w) || DOT.includes(w)) continue;
@@ -171,7 +182,15 @@
       const e = ext.get(w); let top = 0;
       for (const v of e.values()) top = Math.max(top, v);
       if (top / c > 0.55) continue;                       /* mostly continues with the same char -> not a word end */
+      if (prefixWord(w)) { if (c >= 10) borderline.push({ name: w, count: c }); continue }
       cands.push({ name: w, count: c });
+    }
+    /* starts with a common word (马里奇 / 表面却): keep only if the book also uses it as a noun — 和马里奇, 对马里奇, 马里奇的 */
+    if (borderline.length) {
+      const nounUse = new Map(borderline.map(b => [b.name, 0]));
+      const re = new RegExp('(?:[对向和与跟给把被让替帮陪叫找见问看望朝]|^)(' + borderline.map(b => b.name).join('|') + ')|(' + borderline.map(b => b.name).join('|') + ')(?=的|[，。])', 'g');
+      for (const p of paras) { re.lastIndex = 0; let m; while ((m = re.exec(p))) { const n = m[1] || m[2]; nounUse.set(n, nounUse.get(n) + 1) } }
+      for (const b of borderline) if (nounUse.get(b.name) >= Math.max(5, b.count * 0.15)) cands.push(b);
     }
     /* drop a candidate that is just a prefix of a stronger one (克莱 vs 克莱恩) */
     cands = cands.filter(a => a.single || !cands.some(b => b !== a && b.name.startsWith(a.name) && !DOT.includes(b.name[a.name.length]) && b.count >= a.count * 0.6));
@@ -215,9 +234,48 @@
       for (const para of res.paras) for (const s of para) if (s.t === 'q' && s.speaker && s.conf !== 'inferred') bump(turns, s.speaker);
     }
     cast.forEach(c => c.lines = turns.get(c.id) || 0);
+    /* final sweep: entries that are ordinary words or verb phrases (明白 / 摩挲 / 忍不住又) are not characters */
+    const JUNK_RE = /^(?:边|一边|用|以|于|却|是|忙|好|半|低|慢|轻|嘴|语|嗓|眸|眼|面朝|下意识|笑容|握|环视|双手|小心|颇|具现|勾勒|拔|轻敲|侧|未|略|穿|戴|坐|抵|并|急|讪|安静|摩|合|忍)|[又却了着过于]$/;
+    cast = cast.filter(c => !/^[“「]/.test(c.name) ? !(words.all.has(c.name) || STOP.has(c.name) || FRAG_RE.test(c.name) || JUNK_RE.test(c.name)) || c.lines >= 200 : true);
     cast = cast.filter(c => c.lines >= (opts.minLines || 5)).sort((a, b) => b.lines - a.lines || a.id.localeCompare(b.id));
     cast.forEach((c, i) => { c.rank = i; Object.assign(c, look(c, i)) });
-    return { version: VERSION, list: cast, matcher: makeMatcher(cast) };
+    /* 帕列斯·索罗亚斯德 is also called 帕列斯: add the given name when no one else uses it */
+    const taken = new Set(cast.flatMap(c => [c.name, ...(c.aliases || [])]));
+    const firstUse = new Map();
+    for (const c of cast) for (const n of [c.name, ...(c.aliases || [])]) {
+      const parts = n.split(/[·•‧・]/); if (parts.length < 2 || parts[0].length < 2) continue;
+      const g = parts[0]; if (taken.has(g) || words.all.has(g) || STOP.has(g)) continue;
+      firstUse.set(g, firstUse.has(g) && firstUse.get(g) !== c ? null : c);
+    }
+    for (const [g, c] of firstUse) if (c) c.aliases.push(g);
+    const finalMatcher = makeMatcher(cast);
+    estimateGender(paras, cast, finalMatcher);
+    return { version: VERSION, list: cast, matcher: finalMatcher };
+  }
+
+  /* 他 or 她: count which pronoun picks up right after a character acts as subject */
+  function estimateGender(paras, cast, matcher) {
+    const m = new Map(), f = new Map(), add = (mp, id) => mp.set(id, (mp.get(id) || 0) + 1);
+    for (const p of paras) {
+      if (p[0] === '“') continue;
+      const sents = p.split(/[。！？!?]/);
+      for (let i = 0; i < sents.length; i++) {
+        const cls = sents[i].split(/[，,]/);
+        const id = matcher.lead(stripLead((cls[0] || '').trim()));
+        if (!id) continue;
+        const nextCls = cls.slice(1).concat(sents[i + 1] ? sents[i + 1].split(/[，,]/)[0] : []);
+        for (const c of nextCls) {
+          const t = c.trim();
+          if (/^他(?!们)/.test(t)) { add(m, id); break }
+          if (/^她(?!们)/.test(t)) { add(f, id); break }
+          if (matcher.lead(stripLead(t))) break;
+        }
+      }
+    }
+    for (const c of cast) {
+      const a = m.get(c.id) || 0, b = f.get(c.id) || 0;
+      if (a + b >= 3) { if (a / (a + b) >= 0.75) c.g = 'm'; else if (b / (a + b) >= 0.75) c.g = 'f' }
+    }
   }
 
   function makeMatcher(cast) {
@@ -241,6 +299,13 @@
         }
         re.lastIndex = 0; const m = re.exec(t);
         if (m && m.index === 0) return map.get(m[0]);
+        /* short title before the name: 心理医生伊思兰特 / 巨人格罗塞尔 (not 看着X / 对X / 和X) */
+        re.lastIndex = 0; const m4 = re.exec(t);
+        if (m4 && m4.index >= 2 && m4.index <= 6 && !/^[“「『]/.test(m4[0])) {
+          const pre = t.slice(0, m4.index), nextCh = t[m4.index + m4[0].length] || '';
+          if (!/[，,。！？：:“”、的了着过]/.test(pre) && !/[向对和与跟给把被让替帮陪叫找见问看望朝冲盯瞥扫打量眼到听]$/.test(pre) &&
+              !SUBORD_RE.test(pre) && !/^(?:他|她|它|祂|我|你|您)/.test(pre) && !/[之的]/.test(nextCh)) return map.get(m4[0]);
+        }
         const head = t.slice(0, 30), de = head.lastIndexOf('的');
         if (de > 0 && !/^(他|她|它|祂)的/.test(t)) {
           re.lastIndex = de + 1; const m3 = re.exec(t);
@@ -277,7 +342,7 @@
       if (id) return { id, conf: verbNear ? 'explicit' : 'context' };   /* “…”克莱恩放下刀叉 */
       if (!verbNear) return null;
       const t = stripLead(c);
-      if (/^(他|她|它|祂)(?![们的])/.test(t)) return { id: null, pronoun: t[0], conf: 'inferred' };
+      if (/^(他|她|它|祂)(?![们的])/.test(t)) return { id: null, pronoun: t[0], conf: 'inferred', ctx: '' };
       const near = cast.matcher.all(c.slice(0, 12))[0];
       return near ? { id: near.id, conf: 'explicit' } : null;
     }
@@ -289,9 +354,14 @@
     for (let ci = clauses.length - 1; ci >= 0; ci--) {
       const t = stripLead(clauses[ci].trim());
       if (!t) continue;
+      /* 就听见莎伦…说道 / 听到伦纳德问道 → the one heard is the speaker */
+      const heard = t.match(/^(?:就|只)?(?:听见|听到)(.{2,14})$/);
+      if (heard && verb && ci === clauses.length - 1) { const h = cast.matcher.lead(heard[1]); if (h) return { id: h, conf: 'explicit' } }
+      if (SUBORD_RE.test(t)) continue;                                    /* 等到X…，… : X is not the subject */
       const id = cast.matcher.lead(t);
       if (id) return { id, conf: verb ? 'explicit' : 'context' };
-      if (/^(他|她|它|祂)(?![们的])/.test(t)) return { id: null, pronoun: t[0], conf: 'inferred' };
+      const pm = t.match(/^(他|她|它|祂)(?![们的])/) || t.match(/^[^，,]{1,14}的(他|她|祂)(?![们的])/);   /* …的他 */
+      if (pm) return { id: null, pronoun: pm[1], conf: 'inferred', ctx: clauses.slice(0, ci).join('，') };
       if (PRONOUN_RE.test(t) && !/^(他|她|它|祂)的/.test(t)) return null;
     }
     const any = cast.matcher.subjects(sent);
@@ -345,29 +415,62 @@
     const pm = t.match(/^(他|她|祂)(?![们的])/);
     return pm ? { pronoun: pm[1] } : null;
   }
+  /* 他/她/祂 → a cast member.
+     1. a name earlier in the same sentence that is not inside a scene-setting clause (这次回答的是马里奇，他…),
+     2. otherwise the most recent sentence subject, skipping characters of the wrong gender. */
+  function genderOk(c, pr) { if (!c || !c.g || pr === '祂') return true; return pr === '她' ? c.g === 'f' : c.g === 'm' }
+  function resolvePronoun(pr, ctx, cast, hist) {
+    const byId = cast.byId || (cast.byId = new Map(cast.list.map(c => [c.id, c])));
+    if (ctx) {
+      const cls = ctx.split(/[，,]/).map(x => stripLead(x.trim())).filter(x => x && !SUBORD_RE.test(x));
+      for (let i = cls.length - 1; i >= 0; i--) {
+        const ms = cast.matcher.subjects(cls[i]);
+        for (let j = ms.length - 1; j >= 0; j--) if (genderOk(byId.get(ms[j].id), pr)) return ms[j].id;
+      }
+    }
+    for (const id of hist) if (genderOk(byId.get(id), pr)) return id;
+    return null;
+  }
+  /* the person a line opens by addressing: “克莱恩，…” / “奥黛丽小姐，…” */
+  function vocative(text, cast) {
+    const m = text.match(/^([^，,！!？?。…“”]{1,10}?)(?:先生|小姐|女士|阁下|大人|队长|老师|夫人)?[，,！!]/);
+    if (!m) return null;
+    const id = cast.matcher.lead(m[1]);
+    return id && cast.matcher.all(m[1]).length <= 1 && m[1].length <= 8 ? id : null;
+  }
   /* subject (lead name) of each clause in a narration chunk; pronoun-led clauses keep the previous subject */
   function subjectsOf(text, cast) {
     const out = [];
     for (const sent of text.split(/[。！？!?…；;：:]/)) {
-      const cl = sent.split(/[，,]/)[0];
-      const t = stripLead((cl || '').trim());
-      if (!t) continue;
-      const id = cast.matcher.lead(t);
-      if (id) out.push(id);
+      for (const cl of sent.split(/[，,]/)) {
+        const t = stripLead((cl || '').trim());
+        if (!t || SUBORD_RE.test(t)) continue;
+        const id = cast.matcher.lead(t);
+        if (id) { out.push(id); break }
+        if (/^(他|她|祂)/.test(t)) break;
+      }
     }
     return out;
   }
   /* chapter: {paras:[...]}. prevTail carries recent speakers across chapter boundaries. */
-  function attributeChapter(chapter, cast, prevTail) {
+  /* anchors: {"paragraph:line": castId | null} — speakers already known (reader labels, model answers).
+     They are used as facts, so turn-taking and pronouns around them follow. */
+  function attributeChapter(chapter, cast, prevTail, anchors) {
     const out = [];
     let recent = prevTail ? prevTail.recent.slice() : [];          /* last speakers, newest first */
     let lastMention = prevTail ? prevTail.lastMention : null;       /* last named character in narration */
     let lastSubject = prevTail ? prevTail.lastSubject : null;       /* last cast member acting as a sentence subject */
     let shortRun = prevTail ? prevTail.shortRun : 0;                /* consecutive short quote-only turns */
     let lastWasDialogue = prevTail ? prevTail.lastWasDialogue : false;
+    let run = prevTail ? prevTail.run || null : null;              /* open multi-paragraph speech: {id, conf} */
     const paras = chapter.paras;
     const push = id => { if (!id) return; recent = [id, ...recent.filter(x => x !== id)].slice(0, 4) };
+    /* recent sentence subjects, newest first, as [id, age in paragraphs]; a pronoun never reaches further back than ~25 paragraphs */
+    let subjHist = prevTail && prevTail.subjHist ? prevTail.subjHist.map(x => x.slice()) : [];
+    const pushSubj = id => { if (!id) return; lastSubject = id; subjHist = [[id, 0], ...subjHist.filter(x => x[0] !== id)].slice(0, 6) };
+    const liveSubj = () => subjHist.filter(x => x[1] <= 25).map(x => x[0]);
     for (let i = 0; i < paras.length; i++) {
+      for (const x of subjHist) x[1]++;
       const p = paras[i], prev = i ? paras[i - 1] : '';
       const prevColon = /[：:]$/.test(prev);
       let segs = segment(p, prevColon);
@@ -387,36 +490,47 @@
           segs = [th[0], th[1], ...segment(p.slice(cut), false)];
         }
       }
-      let paraSpeaker = null, sawQuote = false, narrSinceQuote = '';
+      let paraSpeaker = null, sawQuote = false, narrSinceQuote = '', li = 0;
+      const cont = run && /^[“「『]/.test(p) ? run : null;         /* this paragraph continues someone's speech */
       for (let k = 0; k < segs.length; k++) {
         const s = segs[k];
         if (s.t === 'th') {
           let id = s.who.id || null, conf = id ? 'explicit' : 'inferred';
-          if (!id) id = lastSubject || recent[0] || null;
+          if (!id) id = resolvePronoun(s.who.pronoun, '', cast, liveSubj()) || null;
           s.speaker = id; s.conf = id ? conf : null; delete s.who;
-          if (id) lastSubject = id;
+          if (id) pushSubj(id);
           continue;
         }
         if (s.t === 'n') {
           narrSinceQuote += s.text;
           const ms = cast.matcher.all(s.text);
           if (ms.length) lastMention = ms[ms.length - 1].id;
-          for (const sub of subjectsOf(s.text, cast)) if (sub !== undefined) lastSubject = sub;
+          for (const sub of subjectsOf(s.text, cast)) pushSubj(sub);
           continue;
         }
         if (!s.spoken) continue;
         let r = null;
+        const akey = i + ':' + (li++);
         const before = k > 0 && segs[k - 1].t === 'n' ? segs[k - 1].text : '';
         const after = k + 1 < segs.length && segs[k + 1].t === 'n' ? segs[k + 1].text : '';
-        if (before.trim()) r = speakerFromText(before, cast, 'pre');
+        if (k === 0 && cont) {
+          r = cont.id ? { id: cont.id, conf: cont.conf } : null;
+          if (after.trim()) { const r2 = speakerFromText(after, cast, 'post'); if (r2 && r2.id && r2.conf === 'explicit') r = r2 }
+        }
+        if (!r && before.trim()) r = speakerFromText(before, cast, 'pre');
         if ((!r || r.conf === 'inferred') && after.trim()) { const r2 = speakerFromText(after, cast, 'post'); if (r2 && (r2.id || !r)) r = r2 }
         if (!r && k === 0 && prevColon) r = speakerFromText(prev, cast, 'pre');
         if (!r && sawQuote && paraSpeaker && !narrSinceQuote.trim()) r = { id: paraSpeaker, conf: 'context' };
         if (!r && sawQuote && paraSpeaker) r = { id: paraSpeaker, conf: 'context' };
         if (r && !r.id && r.pronoun) {
-          /* 他/她: the last character who acted as a sentence subject (not merely mentioned) */
-          r = lastSubject ? { id: lastSubject, conf: 'inferred' } : null;
+          const id = resolvePronoun(r.pronoun, r.ctx || '', cast, liveSubj());
+          r = id ? { id, conf: 'inferred' } : null;
         }
+        /* “克莱恩，你……” : the person addressed is not the one speaking */
+        const voc = vocative(s.text, cast);
+        if (r && voc && r.id === voc && r.conf !== 'explicit') r = null;
+        if (!r && voc && recent.length >= 2 && recent.slice(0, 2).includes(voc) && recent[0] !== recent[1])
+          r = { id: recent[0] === voc ? recent[1] : recent[0], conf: 'inferred' };
         if (!r && k === 0 && segs.length === 1 && lastWasDialogue && shortRun >= 2 && s.text.length <= 30 &&
             recent.length >= 2 && recent[0] !== recent[1]) {
           r = { id: recent[1], conf: 'inferred' };                 /* quick A, B, A … exchange */
@@ -426,10 +540,25 @@
           const lead = cast.matcher.lead(stripLead((clauses[clauses.length - 1] || '').trim()));
           if (lead) r = { id: lead, conf: 'inferred' };            /* actor of the previous beat */
         }
+        if (anchors && Object.prototype.hasOwnProperty.call(anchors, akey)) r = { id: anchors[akey] || null, conf: 'anchor' };
         if (r && r.id) { s.speaker = r.id; s.conf = r.conf; push(r.id); paraSpeaker = r.id }
         else { s.speaker = null; s.conf = null }
         sawQuote = true; narrSinceQuote = '';
       }
+      /* “我……”“也……”“不……”“知道……”X说道 : the tag after the last quote covers the whole run */
+      for (let k = segs.length - 1; k > 0; k--) {
+        const a = segs[k];
+        if (!(a.t === 'q' && a.spoken && a.speaker && (a.conf === 'explicit' || a.conf === 'context'))) continue;
+        for (let j = k - 1; j >= 0; j--) {
+          const b = segs[j];
+          if (b.t === 'n' && !b.text.trim()) continue;
+          if (!(b.t === 'q' && b.spoken)) break;
+          if (b.conf === 'anchor') break;
+          if (!b.speaker || b.conf === 'inferred' || b.speaker === a.speaker) { b.speaker = a.speaker; b.conf = a.conf } else break;
+        }
+      }
+      /* a speech that stays open carries its speaker into the next “ paragraph */
+      run = segs[0] && segs[0].t === 'q' && segs[0].open_run ? { id: segs[0].speaker || null, conf: segs[0].conf || null } : null;
       const hasDialogue = segs.some(s => s.t === 'q' && s.spoken);
       const narrOnly = !hasDialogue;
       if (narrOnly && p.length > 60) recent = recent.slice(0, 2);  /* long narration loosens turn-taking */
@@ -438,7 +567,7 @@
       shortRun = quoteOnly && segs[0].text.length <= 30 ? shortRun + 1 : (hasDialogue && segs[0].t === 'q' && segs.every(x => x.t === 'q' || x.text.length < 30) ? 1 : 0);
       out.push(segs);
     }
-    return { paras: out, tail: { recent, lastMention, lastSubject, shortRun, lastWasDialogue } };
+    return { paras: out, tail: { recent, lastMention, lastSubject, subjHist, shortRun, lastWasDialogue, run } };
   }
 
   const api = { VERSION, segment, buildCast, attributeChapter, makeMatcher, parseWords };

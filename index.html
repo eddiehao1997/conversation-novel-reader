@@ -122,11 +122,38 @@ body.t-dark{--av-l:.64;--av-c:.11;--nm-l:.80;--bub-mix:17%;--bub-line:38%}
   border:1px solid color-mix(in oklab,oklch(var(--av-l) var(--av-c) var(--h)) var(--bub-line),var(--bg));
   border-radius:4px 14px 14px 14px;padding:.4em .8em;max-width:100%;text-align:left;overflow-wrap:anywhere}
 .dl-row.inf .dl-bub{border-style:dashed}
-.dl-tag{font-size:.84em;color:var(--muted);line-height:1.6;padding:0 .2em}
+/* narration and inner monologue inside a dialogue paragraph: plain body text, no special format */
+main .dl-narr{margin:0 0 .6em}
+.dl-row.cont{margin-top:-.45em}
+.dl-row.cont .av{opacity:0}
+.dl-row.cont .av:focus-visible{opacity:1}
+.dl-row.cont .dl-who{display:none}
 .dl-row.unk .av{background:var(--line);color:var(--muted);text-shadow:none}
 .dl-row.unk .dl-who{color:var(--muted)}
 .dl-row.unk .dl-bub{background:var(--panel);border-color:var(--line)}
 .dlg.para{margin:0 0 .8em}
+/* bubble header: name + confirm */
+.dl-head{display:flex;align-items:center;gap:6px}
+.dl-ok{border:1px solid color-mix(in oklab,oklch(var(--av-l) var(--av-c) var(--h)) 45%,var(--bg));background:transparent;color:oklch(var(--nm-l) .12 var(--h));
+  border-radius:999px;font:12px/1 var(--ui);padding:3px 8px;cursor:pointer;min-height:22px}
+.dl-ok:hover{background:color-mix(in oklab,oklch(var(--av-l) var(--av-c) var(--h)) 15%,var(--bg))}
+.dl-row.cont .dl-head{display:none}
+/* sheet tabs + accuracy */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:0 -16px;padding:0 16px}
+.tab{background:none;border:0;border-bottom:2px solid transparent;padding:6px 10px;cursor:pointer;color:var(--muted);font:inherit}
+.tab.on{color:var(--fg);border-bottom-color:var(--accent)}
+.acc{padding:4px 16px 12px;display:flex;flex-direction:column;gap:10px}
+.acc-note{margin:0;color:var(--muted);font-size:13px;line-height:1.6}
+.acc-row{display:grid;grid-template-columns:7.5em 1fr auto auto;gap:10px;align-items:center}
+.acc-bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.acc-bar i{display:block;height:100%;background:var(--accent)}
+.acc-off{font-size:11px;color:#b4462f;border:1px solid #b4462f;border-radius:999px;padding:1px 6px}
+.acc-acts{display:flex;gap:8px;flex-wrap:wrap}
+#settings .inp{flex:1;min-width:0;max-width:170px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);font:13px var(--ui)}
+#settings .note-inline{font-size:12px;color:var(--muted);min-width:0;overflow-wrap:anywhere}
+#settings .note code{font-size:11px;background:var(--bg);padding:1px 4px;border-radius:4px;overflow-wrap:anywhere}
+#llmBox{border-left:2px solid var(--line);padding-left:10px;margin:4px 0 8px}
+#settings{max-height:calc(100vh - 80px);overflow:auto}
 /* switch */
 .switch{position:relative;width:44px;height:26px;flex:none}
 .switch input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
@@ -188,7 +215,14 @@ body.t-dark{--av-l:.64;--av-c:.11;--nm-l:.80;--bub-mix:17%;--bub-line:38%}
   </select></div>
   <div class="row"><label for="dlgOn">对话气泡</label><span class="switch"><input type="checkbox" id="dlgOn" role="switch"><span></span></span></div>
   <div class="note" id="dlgNote">用颜色和头像区分说话的角色（实验功能）</div>
-  <div class="row" id="castRow" hidden>角色 <button class="btn" id="castBtn">管理角色</button></div>
+  <div class="row" id="castRow" hidden>角色 <button class="btn" id="castBtn">角色与标注</button></div>
+  <div class="row" id="llmRow" hidden><label for="llmOn">本地模型复核</label><span class="switch"><input type="checkbox" id="llmOn" role="switch"><span></span></span></div>
+  <div id="llmBox" hidden>
+    <div class="row"><label for="llmHost">地址</label><input id="llmHost" class="inp" spellcheck="false" autocomplete="off"></div>
+    <div class="row"><label for="llmModel">模型</label><input id="llmModel" class="inp" list="llmModels" spellcheck="false" autocomplete="off"><datalist id="llmModels"></datalist></div>
+    <div class="row"><button class="btn" id="llmTest">测试连接</button><span id="llmTestOut" class="note-inline"></span></div>
+    <div class="note">用电脑上的 Ollama 复核规则拿不准的句子，不联网。启动方法：<code>OLLAMA_ORIGINS="https://eddiehao1997.github.io,null" ollama serve</code>（null 对应双击打开的单文件版），再 <code>ollama pull qwen2.5:7b</code>。手机上不可用，会自动只用规则。</div>
+  </div>
   <div class="row">主题
     <span class="swatches">
       <button class="swatch auto" data-theme="auto" title="跟随系统"></button>
@@ -210,7 +244,7 @@ const store={get(k,d){try{const v=localStorage.getItem('nr_'+k);return v==null?d
              set(k,v){try{localStorage.setItem('nr_'+k,JSON.stringify(v))}catch(e){}}};
 
 /* ---------- IndexedDB: keep the last book so reopening needs no re-pick ---------- */
-function idb(){return new Promise((res,rej)=>{try{const r=indexedDB.open('novelReader',2);r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains('books'))d.createObjectStore('books');if(!d.objectStoreNames.contains('cast'))d.createObjectStore('cast')};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}})}
+function idb(){return new Promise((res,rej)=>{try{const r=indexedDB.open('novelReader',3);r.onupgradeneeded=()=>{const d=r.result;for(const n of ['books','cast','llm'])if(!d.objectStoreNames.contains(n))d.createObjectStore(n)};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}})}
 async function idbGet(st,k){try{const db=await idb();return await new Promise(r=>{const q=db.transaction(st).objectStore(st).get(k);q.onsuccess=()=>r(q.result||null);q.onerror=()=>r(null)})}catch(e){return null}}
 async function idbPut(st,k,v){try{const db=await idb();db.transaction(st,'readwrite').objectStore(st).put(v,k)}catch(e){}}
 async function saveBook(name,buf){try{const db=await idb();db.transaction('books','readwrite').objectStore('books').put({name,buf},'last')}catch(e){}}
@@ -218,7 +252,7 @@ async function loadBook(){try{const db=await idb();return await new Promise(r=>{
 
 /* ---------- settings ---------- */
 const FONTS={serif:'var(--serif)',sans:'var(--ui)',kai:'"Kaiti SC","STKaiti","KaiTi","BiauKai",var(--serif)'};
-const S=Object.assign({fs:innerWidth<600?19:20,lh:1.9,w:40,theme:'auto',font:'serif',dialogue:false},store.get('settings',{}));
+const S=Object.assign({fs:innerWidth<600?19:20,lh:1.9,w:40,theme:'auto',font:'serif',dialogue:false,llm:false,llmHost:'http://localhost:11434',llmModel:'qwen2.5:7b'},store.get('settings',{}));
 if(!FONTS[S.font])S.font='serif';
 function applySettings(){
   const r=document.documentElement.style;
@@ -228,6 +262,10 @@ function applySettings(){
   requestAnimationFrame(()=>{const m=document.getElementById('themeColor');if(m)m.content=getComputedStyle(document.body).getPropertyValue('--panel').trim()||'#eeeae1'});
   document.querySelectorAll('.swatch').forEach(s=>s.setAttribute('aria-pressed',s.dataset.theme===S.theme));
   $('#dlgOn').checked=!!S.dialogue;$('#castRow').hidden=!S.dialogue;
+  const llmOk=!window.NO_LOCAL_LLM;
+  $('#llmRow').hidden=!S.dialogue||!llmOk;$('#llmOn').checked=!!S.llm;$('#llmBox').hidden=!S.dialogue||!llmOk||!S.llm;
+  if(document.activeElement!==$('#llmHost'))$('#llmHost').value=S.llmHost;
+  if(document.activeElement!==$('#llmModel'))$('#llmModel').value=S.llmModel;
   $('#fsVal').textContent=S.fs;$('#lh').value=S.lh;$('#w').value=S.w;$('#font').value=S.font;
   store.set('settings',S);
 }
@@ -326,7 +364,7 @@ function render(i,p){
   $('#main').innerHTML=`<h2>${esc(c.title)}</h2><div id="text">${body||'<p class="empty">（本卷开始）</p>'}</div>
     <div class="nav"><button class="btn" id="prev" ${idx?'':'disabled'}>← 上一章</button>
     <button class="btn" id="next" ${idx<book.chapters.length-1?'':'disabled'}>下一章 →</button></div>
-    <div class="hint">第 ${idx+1} / ${book.chapters.length} 节 · 本章结束时全书 <span id="endPct"></span>${isTouch?' · 左右滑动切换章节':' · ← → 切换章节 · T 打开目录'}</div>`;
+    <div class="hint">第 ${idx+1} / ${book.chapters.length} 节 · 本章结束时全书 <span id="endPct"></span><span id="llmStat"></span>${isTouch?' · 左右滑动切换章节':' · ← → 切换章节 · T 打开目录'}</div>`;
   paraEls=c.paras.length?[...document.querySelectorAll('#text > .para')]:[];
   $('#endPct').textContent=fmtPct((c.start+c.len)/book.total);
   $('#prev').onclick=()=>render(idx-1);$('#next').onclick=()=>render(idx+1);
@@ -335,6 +373,7 @@ function render(i,p){
   $('#bar').classList.remove('hide');
   scrollToPara(p||0);
   markToc();updateProgress();saveProgress(true);
+  if(typeof llmOn==='function'&&llmOn()){setLlmStat(llm.stat);setTimeout(llmPump,0)}
 }
 
 /* ---------- progress: local record keyed by book fingerprint ---------- */
@@ -396,8 +435,17 @@ function loadDialogueLib(){
   if(dlg.lib)return dlg.lib;
   return dlg.lib=new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='dialogue.js';sc.onload=()=>res(window.Dialogue);sc.onerror=()=>{dlg.lib=null;rej(new Error('load'))};document.head.appendChild(sc)});
 }
+/* ---------- labels ----------
+   Per book, on this device:
+     line:  {"ch:p:q": castId | ""}   speaker set by the reader ("" = not a cast member)
+     ok:    {"ch:p:q": castId}        reader confirmed the speaker shown (✓)
+     meta:  {"ch:p:q": {rule, ruleConf, model, text}}  what each source said when the reader labelled it,
+            so accuracy per source can be measured from the reader's own labels
+     merge: {castId: castId}          one entry is the same person as another
+     hide:  {castId: true}            not a character */
 const fixes={
-  get(){return book?store.get('dlg_'+book.id,{line:{},merge:{},hide:{}}):{line:{},merge:{},hide:{}}},
+  blank(){return {line:{},ok:{},meta:{},merge:{},hide:{}}},
+  get(){return Object.assign(this.blank(),book?store.get('dlg_'+book.id,{}):{})},
   set(v){if(book)store.set('dlg_'+book.id,v)},
 };
 function castById(id){return dlg.cast&&dlg.cast.byId.get(id)}
@@ -451,45 +499,159 @@ function avHTML(c,extra=''){
   if(!c)return `<span class="av ${extra}" aria-hidden="true">?</span>`;
   return `<span class="av p${c.pattern} ${extra}" style="--h:${c.hue}" aria-hidden="true">${esc(c.glyph)}</span>`;
 }
+const has=(o,k)=>Object.prototype.hasOwnProperty.call(o,k);
+function hashStr(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0}return h.toString(36)}
+
+/* ---------- accuracy of each source, measured on the reader's labels ---------- */
+const SRC_NAMES={'rule:explicit':'规则 · 明确','rule:context':'规则 · 上下文','rule:inferred':'规则 · 推测','rule:none':'规则 · 未识别','model':'本地模型'};
+function sourceStats(f){
+  const st={};const add=(k,ok)=>{const s=st[k]||(st[k]={n:0,ok:0});s.n++;if(ok)s.ok++};
+  for(const [key,m] of Object.entries(f.meta)){
+    const truth=has(f.line,key)?resolveSpeaker(f.line[key]||null,f):has(f.ok,key)?resolveSpeaker(f.ok[key],f):undefined;
+    if(truth===undefined)continue;
+    add('rule:'+(m.ruleConf||'none'),resolveSpeaker(m.rule||null,f)===truth);
+    if(m.model!==undefined&&m.model!==null)add('model',resolveSpeaker(m.model,f)===truth);
+  }
+  return st;
+}
+/* a source that is wrong more often than right on ≥20 of this reader's labels stops showing guesses */
+function demotedSources(f){
+  const out=new Set();
+  for(const [k,s] of Object.entries(sourceStats(f)))if(k!=='rule:explicit'&&s.n>=20&&s.ok/s.n<0.6)out.add(k);
+  return out;
+}
+
+/* ---------- local model (Ollama) ---------- */
+const llm={cache:new Map(),busy:false,ctl:null,err:null,lib:null,stat:''};
+function llmAvailable(){return !window.NO_LOCAL_LLM}
+function llmOn(){return llmAvailable()&&S.llm&&dlgReady()}
+function loadLLMLib(){
+  if(window.LocalLLM)return Promise.resolve(window.LocalLLM);
+  if(llm.lib)return llm.lib;
+  return llm.lib=new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='llm.js';sc.onload=()=>res(window.LocalLLM);sc.onerror=()=>{llm.lib=null;rej(new Error('load'))};document.head.appendChild(sc)});
+}
+/* reader labels in one chapter, as anchors {"p:q": castId|null} */
+function chapterAnchors(ci,f){
+  const out={},pre=ci+':';
+  for(const [k,v] of Object.entries(f.ok))if(k.startsWith(pre))out[k.slice(pre.length)]=v||null;
+  for(const [k,v] of Object.entries(f.line))if(k.startsWith(pre))out[k.slice(pre.length)]=v||null;
+  return out;
+}
+function llmKey(ci,anch){return book.id+':v'+window.Dialogue.VERSION+':'+S.llmModel+':'+ci+':'+hashStr(JSON.stringify(Object.entries(anch).sort()))}
+function llmErrText(e){
+  const c=e&&e.code;
+  if(c==='no_model')return `本地模型：未安装 ${S.llmModel}`;
+  if(c==='timeout')return '本地模型：响应超时';
+  if(c==='unreachable'||c==='load')return '本地模型：未连接';
+  return '本地模型：出错';
+}
+function setLlmStat(t){llm.stat=t;const el=document.getElementById('llmStat');if(el)el.textContent=t?' · '+t:''}
+function llmExamples(f,ci){
+  const out=[];
+  for(const [k,m] of Object.entries(f.meta).reverse()){
+    if(k.startsWith(ci+':')||!m.text)continue;
+    const id=has(f.line,k)?f.line[k]:f.ok[k];const c=id&&castById(resolveSpeaker(id,f));
+    if(c)out.push({text:'“'+m.text.slice(0,40)+'”',answer:c.name});
+    if(out.length>=3)break;
+  }
+  return out;
+}
+async function llmPump(){
+  if(!llmOn()||llm.busy||llm.err)return;
+  const L=await loadLLMLib().catch(()=>null);
+  if(!L){llm.err={code:'load'};setLlmStat(llmErrText(llm.err));return}
+  for(const ci of [idx,idx+1]){
+    if(!book||ci>=book.chapters.length||!llmOn())return;
+    const f=fixes.get(),anch=chapterAnchors(ci,f),key=llmKey(ci,anch);
+    if(llm.cache.has(key))continue;
+    const saved=await idbGet('llm',key);
+    if(saved){llm.cache.set(key,saved);if(ci===idx)rerender();continue}
+    const forBook=book.id,c=book.chapters[ci];
+    const res=window.Dialogue.attributeChapter({paras:c.paras},dlg.cast,dlg.data.tails[ci]||null,anch);
+    if(!L.targetsOf(res,anch).length){llm.cache.set(key,{});continue}
+    llm.busy=true;llm.ctl=new AbortController();
+    setLlmStat(ci===idx?'本地模型复核中…':'本地模型预读下一章…');
+    try{
+      const out=await L.reviewChapter({chapter:{paras:c.paras},res,cast:dlg.cast,host:S.llmHost,model:S.llmModel,anchors:anch,
+        examples:llmExamples(f,ci),signal:llm.ctl.signal,onProgress:(d,t)=>{if(ci===idx)setLlmStat(`本地模型复核 ${d}/${t}`)}});
+      llm.busy=false;
+      if(!book||book.id!==forBook)return;
+      llm.cache.set(key,out);idbPut('llm',key,out);
+      setLlmStat('');
+      if(ci===idx)rerender();
+    }catch(e){
+      llm.busy=false;
+      if(e&&e.code==='aborted')return;
+      llm.err=e;setLlmStat(llmErrText(e));return;
+    }
+  }
+  setLlmStat('');
+}
+function llmReset(){if(llm.ctl)llm.ctl.abort();llm.busy=false;llm.err=null;setLlmStat('')}
+
+/* ---------- one chapter: every line's speaker and where it came from ----------
+   reader label  >  rule (explicit)  >  local model  >  rule (context / inferred)  >  unknown */
+function analyzeChapter(ci){
+  const D=window.Dialogue,f=fixes.get(),c=book.chapters[ci],tail=dlg.data.tails[ci]||null;
+  const user=chapterAnchors(ci,f);
+  const base=D.attributeChapter({paras:c.paras},dlg.cast,tail,null);
+  const ruleBy={};
+  base.paras.forEach((segs,pi)=>{let qi=0;for(const s of segs)if(isLine(s))ruleBy[pi+':'+(qi++)]={id:s.speaker||null,conf:s.conf||null}});
+  const mres=llmOn()?llm.cache.get(llmKey(ci,user)):undefined;
+  const modelUse={};
+  if(mres)for(const [k,v] of Object.entries(mres))if(v&&ruleBy[k]&&ruleBy[k].conf!=='explicit'&&!has(user,k))modelUse[k]=v;
+  const anchors=Object.assign({},modelUse,user);
+  const res=Object.keys(anchors).length?D.attributeChapter({paras:c.paras},dlg.cast,tail,anchors):base;
+  const demoted=demotedSources(f);
+  const lines={};
+  res.paras.forEach((segs,pi)=>{let qi=0;for(const s of segs){
+    if(!isLine(s))continue;
+    const k=pi+':'+(qi++),full=ci+':'+k,r=ruleBy[k]||{};
+    let src,id;
+    if(has(user,k)){src=has(f.line,full)?'manual':'ok';id=user[k]}
+    else if(has(modelUse,k)){src='model';id=modelUse[k]}
+    else{src='rule:'+(s.speaker&&s.conf?s.conf:'none');id=s.speaker||null}
+    const shown=demoted.has(src)?null:resolveSpeaker(id,f);
+    lines[k]={id:shown,src:shown?src:(demoted.has(src)?'demoted':src),rule:r.id,ruleConf:r.conf,model:mres?(has(mres,k)?mres[k]:undefined):undefined,text:s.text};
+  }});
+  dlg.last={ci,lines};
+  return {res,lines};
+}
 function renderDialogue(ci,c){
-  const D=window.Dialogue,f=fixes.get();
-  const res=D.attributeChapter({paras:c.paras},dlg.cast,dlg.data.tails[ci]||null);
+  const {res,lines}=analyzeChapter(ci);
+  let prevEndId;                                 /* speaker whose bubble ended the previous paragraph */
   return res.paras.map((segs,pi)=>{
-    if(!segs.some(isLine))return `<p class="para">${esc(c.paras[pi])}</p>`;
-    /* group into runs: one row per consecutive speaker; narration stays in order as small tags */
-    const rows=[];let cur=null,pending=[],qi=0;
+    if(!segs.some(isLine)){prevEndId=undefined;return `<p class="para">${esc(c.paras[pi])}</p>`}
+    /* sequence of narration lines (plain body text) and rows (one per consecutive speaker) */
+    const seq=[];let qi=0;
     for(const sg of segs){
       if(!isLine(sg)){
         const txt=sg.t==='q'?sg.open+sg.text+sg.close:sg.text;
         if(!txt.trim())continue;
-        if(cur)cur.items.push({tag:txt});else pending.push({tag:txt});
+        const last=seq[seq.length-1];
+        if(last&&last.narr!==undefined)last.narr+=txt;else seq.push({narr:txt});
         continue;
       }
-      const key=ci+':'+pi+':'+qi;qi++;
-      const manual=Object.prototype.hasOwnProperty.call(f.line,key);
-      const raw=manual?(f.line[key]||null):sg.speaker;
-      const id=resolveSpeaker(raw,f);
-      const conf=manual?'manual':(id?sg.conf:null);
-      if(!cur||cur.id!==id){
-        /* narration between two different speakers belongs to the next one's lead-in */
-        if(cur&&cur.id!==id){const t=[];while(cur.items.length&&cur.items[cur.items.length-1].tag!==undefined)t.unshift(cur.items.pop());pending=t.concat(pending)}
-        cur={id,conf,key,items:pending.slice()};pending=[];rows.push(cur);
-      }
-      cur.items.push({q:sg.text,key});
-      if(conf==='inferred'&&cur.conf!=='inferred'&&cur.conf!=='manual')cur.conf=conf;
+      const k=pi+':'+(qi++),L=lines[k],key=ci+':'+k;
+      const last=seq[seq.length-1];
+      if(last&&last.row&&last.id===L.id){last.qs.push(sg.text);last.keys.push(key);last.srcs.push(L.src)}
+      else seq.push({row:true,id:L.id,key,keys:[key],srcs:[L.src],qs:[sg.text]});
     }
-    if(pending.length&&cur)cur.items.push(...pending);
-    const html=rows.map(r=>{
-      const ch=r.id?castById(r.id):null;
+    const html=seq.map((it,k)=>{
+      if(it.narr!==undefined)return `<p class="dl-narr">${esc(it.narr)}</p>`;
+      const ch=it.id?castById(it.id):null;
       const label=ch?esc(ch.name):'未知';
-      const cf=r.conf==='inferred'?'<span class="cf">推测</span>':r.conf==='manual'?'<span class="cf">已修正</span>':'';
-      /* adjacent narration pieces (split by an embedded “quoted term”) form one line */
-      const items=[];for(const it of r.items){const last=items[items.length-1];if(it.tag!==undefined&&last&&last.tag!==undefined)last.tag+=it.tag;else items.push({...it})}
-      const body=items.map(it=>it.q!==undefined?`<div class="dl-bub">${esc(it.q)}</div>`:`<span class="dl-tag">${esc(it.tag)}</span>`).join('');
-      return `<div class="dl-row${ch?'':' unk'}${r.conf==='inferred'?' inf':''}"${ch?` style="--h:${ch.hue}"`:''}>
-        <button class="av${ch?' p'+ch.pattern:''}" data-fix="${r.key}" aria-label="更改说话人：${label}">${ch?esc(ch.glyph):'?'}</button>
-        <div class="dl-col"><button class="dl-who" data-fix="${r.key}">${label}${cf}</button>${body}</div></div>`;
+      const guess=it.srcs.includes('rule:inferred')?'inferred':it.srcs.includes('model')?'model':null;
+      const manual=it.srcs.includes('manual');
+      const cf=manual?'<span class="cf">已修正</span>':guess==='inferred'?'<span class="cf">推测</span>':guess==='model'?'<span class="cf">模型</span>':'';
+      const ok=ch&&guess&&!manual?`<button class="dl-ok" data-ok="${it.keys.join(',')}" aria-label="确认是${label}说的" title="说得对">✓</button>`:'';
+      /* a speech running on from the previous paragraph: no repeated avatar/name */
+      const cont=k===0&&it.id&&prevEndId===it.id;
+      return `<div class="dl-row${ch?'':' unk'}${guess==='inferred'?' inf':''}${cont?' cont':''}"${ch?` style="--h:${ch.hue}"`:''}>
+        <button class="av${ch?' p'+ch.pattern:''}" data-fix="${it.key}" aria-label="更改说话人：${label}">${ch?esc(ch.glyph):'?'}</button>
+        <div class="dl-col"><div class="dl-head"><button class="dl-who" data-fix="${it.key}">${label}${cf}</button>${ok}</div>${it.qs.map(q=>`<div class="dl-bub">${esc(q)}</div>`).join('')}</div></div>`;
     }).join('');
+    const tail=seq[seq.length-1];prevEndId=tail&&tail.row?tail.id:undefined;
     return `<div class="para dlg">${html}</div>`;
   }).join('');
 }
@@ -500,8 +662,18 @@ $('#dlgOn').onchange=e=>{
   if(S.dialogue&&!dlgReady()){heldPos=null;ensureDialogue();return}
   render(pos?pos.ch:idx,pos?pos.p:0);heldPos=null;
 };
+/* record a label together with what each source said, then re-run the chapter */
+function labelLines(keys,id,kind){
+  const f=fixes.get(),L=dlg.last&&dlg.last.lines;
+  for(const key of keys){
+    const k=key.split(':').slice(1).join(':'),line=L&&L[k];
+    if(kind==='fix'){f.line[key]=id;delete f.ok[key]}else{f.ok[key]=id;delete f.line[key]}
+    if(line&&!f.meta[key])f.meta[key]={rule:line.rule,ruleConf:line.ruleConf,model:line.model,text:line.text.slice(0,60)};
+  }
+  fixes.set(f);rerender();
+}
 
-/* ---------- sheet: speaker picker & cast manager ---------- */
+/* ---------- sheet: speaker picker, cast manager, accuracy ---------- */
 let sheetState=null;
 function openSheet(state){
   sheetState=state;$('#sheet').hidden=false;$('#shade').hidden=false;
@@ -515,6 +687,20 @@ function castRows(filter,f,opts={}){
   const list=dlg.cast.list.filter(c=>!f.merge[c.id]&&(opts.showHidden||!f.hide[c.id])&&(!q||c.name.includes(q)||(c.aliases||[]).some(a=>a.includes(q))));
   return q?list:list.slice(0,opts.limit||60);
 }
+function accuracyHTML(f){
+  const st=sourceStats(f),dem=demotedSources(f);
+  const nFix=Object.keys(f.line).length,nOk=Object.keys(f.ok).length;
+  const rows=Object.keys(SRC_NAMES).filter(k=>st[k]).map(k=>{
+    const s=st[k],pct=Math.round(s.ok/s.n*100);
+    return `<div class="acc-row"><span class="nm">${SRC_NAMES[k]}</span><span class="acc-bar"><i style="width:${pct}%"></i></span><span class="meta">${pct}% · ${s.n} 句</span>${dem.has(k)?'<span class="acc-off" title="准确率低于 60%，本书中这类猜测改为显示「未知」">已停用</span>':''}</div>`;
+  }).join('');
+  return `<div class="acc">
+    <p class="acc-note">你每修正（点头像）或确认（点 ✓）一句，就会记下当时规则和本地模型各自给出的答案，用来计算它们在这本书上的准确率。某个来源在 20 句以上的标注中准确率低于 60% 时，它的猜测会自动改为显示「未知」。</p>
+    ${rows||'<p class="acc-note">还没有标注。读书时遇到「推测」或「模型」的气泡，点 ✓ 确认或点头像修正即可。</p>'}
+    <p class="acc-note">已标注 ${nFix+nOk} 句（修正 ${nFix}，确认 ${nOk}）</p>
+    <div class="acc-acts"><button class="btn" id="accExport">导出标注</button><label class="btn" for="accImport">导入标注</label><input type="file" id="accImport" accept=".json,application/json" hidden></div>
+  </div>`;
+}
 function drawSheet(){
   const st=sheetState;if(!st)return;const f=fixes.get();const el=$('#sheet');
   const search=st.q||'';
@@ -527,37 +713,79 @@ function drawSheet(){
       <input id="sheetSearch" placeholder="搜索角色…" value="${esc(search)}" autocomplete="off"></header>
       <div id="sheetList">${rows||'<div class="pick"><span class="nm">没有匹配的角色</span></div>'}
         <button class="pick" data-id=""><span class="av" aria-hidden="true">?</span><span class="nm">未知 / 不是这些角色</span></button></div>
-      <footer><span>修正只影响这本书，保存在这台设备上</span>${st.manual?'<button class="btn" id="sheetReset">恢复自动识别</button>':''}</footer>`;
+      <footer><span>修正会让本章前后的判断一起更新</span>${st.manual?'<button class="btn" id="sheetReset">恢复自动识别</button>':''}</footer>`;
   }else{
-    const rows=castRows(search,f,{showHidden:true,limit:400}).map(c=>{
-      const merged=Object.keys(f.merge).filter(k=>f.merge[k]===c.id).map(k=>castById(k)).filter(Boolean).map(x=>x.name);
-      const al=[...(c.aliases||[]),...merged];
-      return `<div class="pick${f.hide[c.id]?' hidden-c':''}">${avHTML(c)}<span class="nm" title="${esc(al.join('、'))}">${esc(c.name)}${al.length?`<span class="meta"> · ${esc(al.slice(0,2).join('、'))}${al.length>2?'…':''}</span>`:''}</span><span class="meta">${c.lines} 句</span>
-        <span class="acts"><button class="btn" data-merge="${esc(c.id)}">合并到…</button><button class="btn" data-hide="${esc(c.id)}">${f.hide[c.id]?'恢复':'不是角色'}</button></span></div>`;
-    }).join('');
-    const n=Object.keys(f.line).length+Object.keys(f.merge).length+Object.keys(f.hide).length;
-    el.innerHTML=`<header><h3 id="sheetTitle">${st.mergeFrom?`把「${esc(castById(st.mergeFrom).name)}」合并到…`:'角色'}<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3>
-      ${st.mergeFrom?'<div class="quote">合并后，这本书里它的所有对话都算作所选角色，并使用所选角色的颜色和头像。</div>':`<div class="quote">按说话次数排列，共 ${dlg.cast.list.length} 个。颜色和头像由书本内容决定，所有章节、所有设备上都一致。</div>`}
-      <input id="sheetSearch" placeholder="搜索角色…" value="${esc(search)}" autocomplete="off"></header>
-      <div id="sheetList">${st.mergeFrom?castRows(search,f).filter(c=>c.id!==st.mergeFrom).map(c=>`<button class="pick" data-into="${esc(c.id)}">${avHTML(c)}<span class="nm">${esc(c.name)}</span><span class="meta">${c.lines} 句</span></button>`).join(''):rows}</div>
-      <footer><span>${n?`已有 ${n} 处修正`:'还没有修正'}</span>${n&&!st.mergeFrom?'<button class="btn" id="sheetResetAll">清除全部修正</button>':''}</footer>`;
+    const tab=st.tab||'cast';
+    const tabs=st.mergeFrom?'':`<div class="tabs" role="tablist"><button role="tab" class="tab${tab==='cast'?' on':''}" data-tab="cast" aria-selected="${tab==='cast'}">角色</button><button role="tab" class="tab${tab==='acc'?' on':''}" data-tab="acc" aria-selected="${tab==='acc'}">准确率</button></div>`;
+    const n=Object.keys(f.line).length+Object.keys(f.ok).length+Object.keys(f.merge).length+Object.keys(f.hide).length;
+    let body,head;
+    if(tab==='acc'&&!st.mergeFrom){head='';body=accuracyHTML(f)}
+    else{
+      const rows=castRows(search,f,{showHidden:true,limit:400}).map(c=>{
+        const merged=Object.keys(f.merge).filter(k=>f.merge[k]===c.id).map(k=>castById(k)).filter(Boolean).map(x=>x.name);
+        const al=[...(c.aliases||[]),...merged];
+        return `<div class="pick${f.hide[c.id]?' hidden-c':''}">${avHTML(c)}<span class="nm" title="${esc(al.join('、'))}">${esc(c.name)}${al.length?`<span class="meta"> · ${esc(al.slice(0,2).join('、'))}${al.length>2?'…':''}</span>`:''}</span><span class="meta">${c.lines} 句</span>
+          <span class="acts"><button class="btn" data-merge="${esc(c.id)}">合并到…</button><button class="btn" data-hide="${esc(c.id)}">${f.hide[c.id]?'恢复':'不是角色'}</button></span></div>`;
+      }).join('');
+      head=(st.mergeFrom?'<div class="quote">合并后，这本书里它的所有对话都算作所选角色，并使用所选角色的颜色和头像。</div>':`<div class="quote">按说话次数排列，共 ${dlg.cast.list.length} 个。颜色和头像由书本内容决定，所有章节、所有设备上都一致。</div>`)+
+        `<input id="sheetSearch" placeholder="搜索角色…" value="${esc(search)}" autocomplete="off">`;
+      body=st.mergeFrom?castRows(search,f).filter(c=>c.id!==st.mergeFrom).map(c=>`<button class="pick" data-into="${esc(c.id)}">${avHTML(c)}<span class="nm">${esc(c.name)}</span><span class="meta">${c.lines} 句</span></button>`).join(''):rows;
+    }
+    el.innerHTML=`<header><h3 id="sheetTitle">${st.mergeFrom?`把「${esc(castById(st.mergeFrom).name)}」合并到…`:'角色与标注'}<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3>${tabs}${head}</header>
+      <div id="sheetList">${body}</div>
+      <footer><span>${n?`已有 ${n} 处修正和确认`:'还没有修正'}</span>${n&&!st.mergeFrom?'<button class="btn" id="sheetResetAll">清除全部修正</button>':''}</footer>`;
   }
   $('#sheetX').onclick=closeSheet;
   const inp=$('#sheetSearch');
-  inp.oninput=e=>{st.q=e.target.value;const pos=e.target.selectionStart;drawSheet();const i2=$('#sheetSearch');i2.focus();i2.setSelectionRange(pos,pos)};
+  if(inp)inp.oninput=e=>{st.q=e.target.value;const pos=e.target.selectionStart;drawSheet();const i2=$('#sheetSearch');i2.focus();i2.setSelectionRange(pos,pos)};
   el.querySelectorAll('input[name=scope]').forEach(r=>r.onchange=()=>{st.scope=r.value});
-  const reset=$('#sheetReset');if(reset)reset.onclick=()=>{const f2=fixes.get();delete f2.line[st.key];fixes.set(f2);closeSheet();rerender()};
-  const ra=$('#sheetResetAll');if(ra)ra.onclick=()=>{fixes.set({line:{},merge:{},hide:{}});drawSheet();rerender()};
+  const reset=$('#sheetReset');if(reset)reset.onclick=()=>{const f2=fixes.get();delete f2.line[st.key];delete f2.ok[st.key];delete f2.meta[st.key];fixes.set(f2);closeSheet();rerender()};
+  const ra=$('#sheetResetAll');if(ra)ra.onclick=()=>{const b=document.createElement('span');ra.replaceWith(b);b.innerHTML='确定清除？ <button class="btn" id="raYes">清除</button> <button class="btn" id="raNo">取消</button>';$('#raYes').onclick=()=>{fixes.set(fixes.blank());drawSheet();rerender()};$('#raNo').onclick=drawSheet};
+  const ex=$('#accExport');if(ex)ex.onclick=exportLabels;
+  const im=$('#accImport');if(im)im.onchange=e=>importLabels(e.target.files[0]);
+}
+/* labels file: same shape as tests/labels-guimi.json, usable with tools/eval.mjs */
+function exportLabels(){
+  const f=fixes.get(),labels={};
+  for(const [k,v] of Object.entries(f.ok)){const c=castById(resolveSpeaker(v,f));labels[k]=c?c.name:''}
+  for(const [k,v] of Object.entries(f.line)){const c=castById(resolveSpeaker(v||null,f));labels[k]=c?c.name:''}
+  const doc={format:'novel-reader-labels/1',book:{id:book.id,title:book.name},exported:new Date().toISOString(),labels,fixes:f};
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(doc,null,1)],{type:'application/json'}));
+  a.download=`${book.name}-对话标注.json`;document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);
+  toast('已导出标注文件');
+}
+function importLabels(file){
+  if(!file)return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const doc=JSON.parse(r.result);
+      if(doc.book&&doc.book.id&&doc.book.id!==book.id){toast('这个标注文件属于另一本书');return}
+      const f=fixes.get(),src=doc.fixes||{};
+      let n=0;
+      for(const k of ['line','ok','meta','merge','hide'])for(const [kk,v] of Object.entries(src[k]||{}))if(!has(f[k],kk)){f[k][kk]=v;n++}
+      if(!doc.fixes&&doc.labels){                         /* plain labels file (e.g. tests/labels-*.json): names → cast ids */
+        const byName=new Map();for(const c of dlg.cast.list){byName.set(c.name,c.id);for(const a of c.aliases||[])if(!byName.has(a))byName.set(a,c.id)}
+        for(const [k,name] of Object.entries(doc.labels))if(!has(f.line,k)&&!has(f.ok,k)){f.line[k]=byName.get(name)||'';n++}
+      }
+      fixes.set(f);drawSheet();rerender();toast(`已导入 ${n} 条标注`);
+    }catch(e){toast('无法读取这个文件，请选择导出的 JSON 标注文件')}
+  };
+  r.readAsText(file);
 }
 $('#sheet').onclick=e=>{
   const st=sheetState;if(!st)return;const f=fixes.get();
+  const tb=e.target.closest('[data-tab]');
+  if(tb){st.tab=tb.dataset.tab;st.q='';drawSheet();return}
   const pick=e.target.closest('[data-id]');
   if(pick&&st.mode==='pick'){
     const id=pick.dataset.id;
-    if(st.scope==='all'&&st.current){if(id&&id!==st.current)f.merge[st.current]=id;else if(!id)f.hide[st.current]=true}
-    else f.line[st.key]=id;
-    fixes.set(f);closeSheet();rerender();
-    toast(st.scope==='all'&&st.current?'已修改本书中所有相同角色的对话':'已修正这句话的说话人');
+    if(st.scope==='all'&&st.current){
+      if(id&&id!==st.current)f.merge[st.current]=id;else if(!id)f.hide[st.current]=true;
+      fixes.set(f);closeSheet();rerender();toast('已修改本书中所有相同角色的对话');
+    }else{closeSheet();labelLines([st.key],id,'fix');toast('已修正，本章前后的判断已更新')}
     return;
   }
   const hide=e.target.closest('[data-hide]');
@@ -569,16 +797,38 @@ $('#sheet').onclick=e=>{
 };
 function rerender(){if(!book)return;const pos=curPos();render(pos.ch,pos.p)}
 $('#main').addEventListener('click',e=>{
-  const b=e.target.closest('[data-fix]');if(!b||!dlgReady())return;
-  const key=b.dataset.fix,[ci,pi,qi]=key.split(':').map(Number);
-  const D=window.Dialogue,f=fixes.get();
-  const res=D.attributeChapter({paras:book.chapters[ci].paras},dlg.cast,dlg.data.tails[ci]||null);
-  const spoken=res.paras[pi].filter(isLine);
-  const manual=Object.prototype.hasOwnProperty.call(f.line,key);
-  const current=resolveSpeaker(manual?f.line[key]:(spoken[qi]&&spoken[qi].speaker),f);
-  openSheet({mode:'pick',key,current,manual,quote:'“'+((spoken[qi]&&spoken[qi].text)||'')+'”',scope:'line',q:''});
+  if(!dlgReady())return;
+  const okb=e.target.closest('[data-ok]');
+  if(okb){
+    const keys=okb.dataset.ok.split(','),L=dlg.last&&dlg.last.lines,k0=keys[0].split(':').slice(1).join(':');
+    const id=L&&L[k0]&&L[k0].id;if(!id)return;
+    labelLines(keys,id,'ok');toast('已确认');return;
+  }
+  const b=e.target.closest('[data-fix]');if(!b)return;
+  const key=b.dataset.fix,k=key.split(':').slice(1).join(':');
+  if(!dlg.last||dlg.last.ci!==+key.split(':')[0])analyzeChapter(+key.split(':')[0]);
+  const L=dlg.last.lines[k],f=fixes.get();
+  openSheet({mode:'pick',key,current:L?L.id:null,manual:has(f.line,key)||has(f.ok,key),quote:'“'+((L&&L.text)||'')+'”',scope:'line',q:''});
 });
 $('#castBtn').onclick=e=>{e.stopPropagation();if(!dlgReady()){ensureDialogue();return}openSheet({mode:'cast',q:''})};
+$('#llmOn').onchange=e=>{S.llm=e.target.checked;llmReset();applySettings();if(S.llm)testLLM(true);rerender()};
+$('#llmHost').onchange=e=>{S.llmHost=e.target.value.trim()||'http://localhost:11434';llmReset();applySettings();testLLM(true)};
+$('#llmModel').onchange=e=>{S.llmModel=e.target.value.trim()||'qwen2.5:7b';llmReset();applySettings();rerender()};
+$('#llmTest').onclick=()=>testLLM(false);
+async function testLLM(quiet){
+  const out=$('#llmTestOut');out.textContent='连接中…';
+  const L=await loadLLMLib().catch(()=>null);
+  if(!L){out.textContent='加载失败';return}
+  try{
+    const models=await L.listModels({host:S.llmHost});
+    $('#llmModels').innerHTML=models.map(m=>`<option value="${esc(m)}">`).join('');
+    const okModel=models.includes(S.llmModel)||models.includes(S.llmModel+':latest');
+    out.textContent=okModel?`已连接 · ${S.llmModel}`:(models.length?`已连接，但没有 ${S.llmModel}；可选：${models.slice(0,3).join('、')}`:`已连接，但还没有模型，请先 ollama pull ${S.llmModel}`);
+    if(okModel){llm.err=null;if(book&&dlgReady())llmPump()}
+  }catch(e){
+    out.textContent=e&&e.code==='unreachable'?'连接不上：请确认 Ollama 已启动，并设置了 OLLAMA_ORIGINS':'连接失败';
+  }
+}
 $('#shade').addEventListener('click',()=>{if(sheetState)closeSheet()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&sheetState)closeSheet()});
 
