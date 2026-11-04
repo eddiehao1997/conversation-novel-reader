@@ -2,7 +2,7 @@
    App files: network-first (so a new deploy shows up right away), cache fallback when offline.
    Google Fonts: stale-while-revalidate, so the reading font works offline after first use.
    Google sign-in and Drive API requests are never cached. */
-const VERSION = 'reader-v5';
+const VERSION = 'reader-v6';
 const SHELL = ['./', './index.html', './config.js', './manifest.webmanifest',
   './dialogue.js', './dialogue-worker.js', './dialogue-words.txt', './llm.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];

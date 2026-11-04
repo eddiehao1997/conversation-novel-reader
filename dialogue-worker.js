@@ -1,10 +1,15 @@
-/* Builds the cast for a whole book off the main thread (about 1s on a laptop, a few
-   seconds on a phone) and returns, for every chapter, the conversation state at its
-   start, so any chapter can then be attributed on its own in a few milliseconds. */
+/* Background work on a whole book, so the page never freezes on a phone:
+   - build:  find the cast (about 1s on a laptop) and the conversation state at the start of every chapter
+   - extend: add the reader's own characters and recompute that state for the whole book */
 importScripts('dialogue.js');
 self.onmessage = async e => {
-  const { chapters } = e.data;
+  const { chapters, type } = e.data;
   try {
+    if (type === 'extend') {
+      const r = Dialogue.extendCast(chapters, e.data.base, e.data.customs);
+      self.postMessage({ ok: true, extra: r.extra, tails: r.tails });
+      return;
+    }
     const t0 = Date.now();
     let words;
     try { words = Dialogue.parseWords(await (await fetch('dialogue-words.txt')).text()) } catch (err) { words = undefined }

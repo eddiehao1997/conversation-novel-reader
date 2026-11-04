@@ -154,6 +154,15 @@ main .dl-narr{margin:0 0 .6em}
 #settings .note code{font-size:11px;background:var(--bg);padding:1px 4px;border-radius:4px;overflow-wrap:anywhere}
 #llmBox{border-left:2px solid var(--line);padding-left:10px;margin:4px 0 8px}
 #settings{max-height:calc(100vh - 80px);overflow:auto}
+.pick.add .add-av{background:var(--line);color:var(--fg);text-shadow:none}
+.badge{font-size:11px;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:1px 6px;white-space:nowrap}
+.srow{display:flex;gap:8px}.srow input{flex:1;min-width:0}
+.cform{display:flex;flex-direction:column;gap:8px;padding:12px 16px 16px}
+.cform input{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font:inherit}
+.cform label{font-size:13px;color:var(--muted)}
+.cf-err{margin:0;color:#b4462f;font-size:13px}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.btn.danger{color:#b4462f;border-color:#b4462f}
 /* switch */
 .switch{position:relative;width:44px;height:26px;flex:none}
 .switch input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
@@ -428,7 +437,7 @@ window.addEventListener('pagehide',()=>{saveProgress(true);flush()});
      line:  {"ch:p:q": castId | ""}  one line's speaker ("" = not a known character)
      merge: {castId: castId}          treat one entry as another everywhere (aliases)
      hide:  {castId: true}            not a character; its lines show as unknown */
-const dlg={data:null,cast:null,busy:false,lib:null};
+const dlg={data:null,cast:null,busy:false,lib:null,tails:null,customSig:''};
 function dlgReady(){return !!(S.dialogue&&book&&dlg.cast&&dlg.data&&dlg.data.bookId===book.id)}
 function loadDialogueLib(){
   if(window.Dialogue)return Promise.resolve(window.Dialogue);
@@ -444,9 +453,22 @@ function loadDialogueLib(){
      merge: {castId: castId}          one entry is the same person as another
      hide:  {castId: true}            not a character */
 const fixes={
-  blank(){return {line:{},ok:{},meta:{},merge:{},hide:{}}},
+  blank(){return {line:{},ok:{},meta:{},merge:{},hide:{},chars:{},ts:{},tomb:{}}},
   get(){return Object.assign(this.blank(),book?store.get('dlg_'+book.id,{}):{})},
-  set(v){if(book)store.set('dlg_'+book.id,v)},
+  /* every change is time-stamped and every removal leaves a tombstone, so two devices can be merged entry by entry */
+  set(v){
+    if(!book)return;
+    const prev=this.get(),now=Date.now();v.ts=v.ts||{};v.tomb=v.tomb||{};
+    const stamp=(k,a,b)=>{if(a!==undefined&&JSON.stringify(a)===JSON.stringify(b))return;if(b===undefined){v.tomb[k]=now;delete v.ts[k]}else{v.ts[k]=now;delete v.tomb[k]}};
+    for(const k of new Set([...Object.keys(prev.line),...Object.keys(prev.ok),...Object.keys(v.line),...Object.keys(v.ok)]))
+      stamp(k,has(prev.line,k)?['fix',prev.line[k]]:has(prev.ok,k)?['ok',prev.ok[k]]:undefined,has(v.line,k)?['fix',v.line[k]]:has(v.ok,k)?['ok',v.ok[k]]:undefined);
+    for(const [cat,pre] of [['merge','m:'],['hide','h:'],['chars','c:']])
+      for(const k of new Set([...Object.keys(prev[cat]),...Object.keys(v[cat])]))stamp(pre+k,prev[cat][k],v[cat][k]);
+    store.set('dlg_'+book.id,v);
+    if(typeof dlgSync!=='undefined')dlgSync.dirty();
+  },
+  /* apply merged state from another device without re-stamping it */
+  setRaw(v){if(book)store.set('dlg_'+book.id,v)},
 };
 function castById(id){return dlg.cast&&dlg.cast.byId.get(id)}
 /* final speaker after corrections: follows merges, drops hidden entries */
@@ -455,6 +477,34 @@ function resolveSpeaker(id,f){
   if(!id||f.hide[id]||!castById(id))return null;
   return id;
 }
+/* ---------- reader-added characters ----------
+   Kept with the labels (f.chars: {id: {name, aliases}}), synced like them. Adding one recomputes the whole book
+   in the background so every line that names them is picked up, not only the line being corrected. */
+function customSpec(f){return Object.entries((f||fixes.get()).chars||{}).map(([id,v])=>({id,name:v.name,aliases:v.aliases||[]})).sort((a,b)=>a.id.localeCompare(b.id))}
+async function applyCustom(quiet){
+  if(!book||!dlg.data)return;
+  const D=window.Dialogue,spec=customSpec(),sig=spec.length?hashStr(JSON.stringify(spec)):'';
+  if(sig===dlg.customSig)return;
+  const base=dlg.data.list;
+  if(!sig){dlg.cast={list:base,byId:new Map(base.map(c=>[c.id,c])),matcher:D.makeMatcher(base)};dlg.tails=dlg.data.tails;dlg.customSig='';return}
+  const key=book.id+':v'+D.VERSION+':custom:'+sig,forBook=book.id;
+  let r=await idbGet('cast',key);
+  if(!r){
+    if(!quiet)toast('正在用新角色重新识别全书…');
+    const chapters=book.chapters.map(c=>({paras:c.paras}));
+    r=await new Promise(resolve=>{
+      try{const w=new Worker(dlgWorkerURL());w.onmessage=e=>{w.terminate();resolve(e.data.ok?e.data:null)};w.onerror=()=>{w.terminate();resolve(null)};
+        w.postMessage({type:'extend',chapters,base,customs:spec})}catch(e){resolve(null)}
+    });
+    if(!r)r=D.extendCast(chapters,base,spec);                 /* no worker: run here */
+    if(!book||book.id!==forBook)return;
+    r={extra:r.extra,tails:r.tails};idbPut('cast',key,r);
+  }
+  const list=base.concat(r.extra);
+  dlg.cast={list,byId:new Map(list.map(c=>[c.id,c])),matcher:D.makeMatcher(list)};dlg.tails=r.tails;dlg.customSig=sig;
+  return r.extra;
+}
+function dlgWorkerURL(){return 'dialogue-worker.js'}
 async function ensureDialogue(){
   if(!book||dlg.busy)return;
   const D=await loadDialogueLib().catch(()=>null);
@@ -467,7 +517,7 @@ async function ensureDialogue(){
     data=await new Promise(resolve=>{
       const chapters=book.chapters.map(c=>({paras:c.paras}));
       try{
-        const w=new Worker('dialogue-worker.js');
+        const w=new Worker(dlgWorkerURL());
         w.onmessage=e=>{w.terminate();resolve(e.data.ok?e.data:null)};
         w.onerror=()=>{w.terminate();resolve(null)};
         w.postMessage({chapters});
@@ -490,7 +540,10 @@ async function ensureDialogue(){
   }
   dlg.data=data;
   const byId=new Map(data.list.map(c=>[c.id,c]));
-  dlg.cast={list:data.list,byId,matcher:D.makeMatcher(data.list)};
+  dlg.cast={list:data.list,byId,matcher:D.makeMatcher(data.list)};dlg.tails=data.tails;dlg.customSig='';
+  await applyCustom(true);
+  await loadPack();
+  if(typeof dlgSync!=='undefined')dlgSync.pull();
   if(S.dialogue){const pos=curPos();render(pos.ch,pos.p)}
 }
 /* a line shown as a bubble: spoken dialogue only (inner monologue stays as body text) */
@@ -537,7 +590,11 @@ function chapterAnchors(ci,f){
   for(const [k,v] of Object.entries(f.line))if(k.startsWith(pre))out[k.slice(pre.length)]=v||null;
   return out;
 }
-function llmKey(ci,anch){return book.id+':v'+window.Dialogue.VERSION+':'+S.llmModel+':'+ci+':'+hashStr(JSON.stringify(Object.entries(anch).sort()))}
+/* model results depend on the chapter's labels and on any reader-added character named in that chapter */
+function llmKey(ci,anch){
+  const named=(dlg.cast?dlg.cast.list.filter(c=>c.custom&&book.chapters[ci].paras.some(p=>[c.name,...c.aliases].some(n=>p.includes(n)))).map(c=>c.id+'='+[c.name,...c.aliases].join('/')):[]).join('|');
+  return book.id+':v'+window.Dialogue.VERSION+':'+S.llmModel+':'+ci+':'+hashStr(JSON.stringify(Object.entries(anch).sort())+named);
+}
 function llmErrText(e){
   const c=e&&e.code;
   if(c==='no_model')return `本地模型：未安装 ${S.llmModel}`;
@@ -567,7 +624,7 @@ async function llmPump(){
     const saved=await idbGet('llm',key);
     if(saved){llm.cache.set(key,saved);if(ci===idx)rerender();continue}
     const forBook=book.id,c=book.chapters[ci];
-    const res=window.Dialogue.attributeChapter({paras:c.paras},dlg.cast,dlg.data.tails[ci]||null,anch);
+    const res=window.Dialogue.attributeChapter({paras:c.paras},dlg.cast,dlg.tails[ci]||null,anch);
     if(!L.targetsOf(res,anch).length){llm.cache.set(key,{});continue}
     llm.busy=true;llm.ctl=new AbortController();
     setLlmStat(ci===idx?'本地模型复核中…':'本地模型预读下一章…');
@@ -576,7 +633,7 @@ async function llmPump(){
         examples:llmExamples(f,ci),signal:llm.ctl.signal,onProgress:(d,t)=>{if(ci===idx)setLlmStat(`本地模型复核 ${d}/${t}`)}});
       llm.busy=false;
       if(!book||book.id!==forBook)return;
-      llm.cache.set(key,out);idbPut('llm',key,out);
+      llm.cache.set(key,out);idbPut('llm',key,out);recordModel(ci,out);
       setLlmStat('');
       if(ci===idx)rerender();
     }catch(e){
@@ -589,15 +646,38 @@ async function llmPump(){
 }
 function llmReset(){if(llm.ctl)llm.ctl.abort();llm.busy=false;llm.err=null;setLlmStat('')}
 
+/* ---------- shared recognition results ----------
+   Model answers per chapter, kept per book so a device without a model (a phone) can use what the computer worked out.
+   Only valid for the same engine version and the same cast (castHash), which the book text alone determines. */
+const pack={data:null};
+function castHash(){return dlg.data?hashStr(dlg.data.list.map(c=>c.id).join('|')):''}
+async function loadPack(){
+  if(!book)return;
+  const d=await idbGet('cast','pack:'+book.id);
+  pack.data=d&&d.bookId===book.id?d:{bookId:book.id,engine:window.Dialogue?window.Dialogue.VERSION:0,castHash:castHash(),model:{}};
+}
+function savePack(){if(pack.data)idbPut('cast','pack:'+pack.data.bookId,pack.data)}
+function packModel(ci){
+  const d=pack.data;if(!d||!window.Dialogue||d.engine!==window.Dialogue.VERSION||d.castHash!==castHash())return undefined;
+  return d.model[ci]?d.model[ci].a:undefined;
+}
+function recordModel(ci,answers){
+  if(!pack.data||pack.data.bookId!==book.id)return;
+  if(pack.data.engine!==window.Dialogue.VERSION||pack.data.castHash!==castHash())pack.data={bookId:book.id,engine:window.Dialogue.VERSION,castHash:castHash(),model:{}};
+  pack.data.model[ci]={a:answers,t:Date.now(),m:S.llmModel};
+  savePack();if(typeof dlgSync!=='undefined')dlgSync.dirty();
+}
+
 /* ---------- one chapter: every line's speaker and where it came from ----------
    reader label  >  rule (explicit)  >  local model  >  rule (context / inferred)  >  unknown */
 function analyzeChapter(ci){
-  const D=window.Dialogue,f=fixes.get(),c=book.chapters[ci],tail=dlg.data.tails[ci]||null;
+  const D=window.Dialogue,f=fixes.get(),c=book.chapters[ci],tail=dlg.tails[ci]||null;
   const user=chapterAnchors(ci,f);
   const base=D.attributeChapter({paras:c.paras},dlg.cast,tail,null);
   const ruleBy={};
   base.paras.forEach((segs,pi)=>{let qi=0;for(const s of segs)if(isLine(s))ruleBy[pi+':'+(qi++)]={id:s.speaker||null,conf:s.conf||null}});
-  const mres=llmOn()?llm.cache.get(llmKey(ci,user)):undefined;
+  /* this device's model answers; otherwise those shared from another device through Drive */
+  const mres=(llmOn()?llm.cache.get(llmKey(ci,user)):undefined)||(S.dialogue?packModel(ci):undefined);
   const modelUse={};
   if(mres)for(const [k,v] of Object.entries(mres))if(v&&ruleBy[k]&&ruleBy[k].conf!=='explicit'&&!has(user,k))modelUse[k]=v;
   const anchors=Object.assign({},modelUse,user);
@@ -697,13 +777,14 @@ function accuracyHTML(f){
   return `<div class="acc">
     <p class="acc-note">你每修正（点头像）或确认（点 ✓）一句，就会记下当时规则和本地模型各自给出的答案，用来计算它们在这本书上的准确率。某个来源在 20 句以上的标注中准确率低于 60% 时，它的猜测会自动改为显示「未知」。</p>
     ${rows||'<p class="acc-note">还没有标注。读书时遇到「推测」或「模型」的气泡，点 ✓ 确认或点头像修正即可。</p>'}
-    <p class="acc-note">已标注 ${nFix+nOk} 句（修正 ${nFix}，确认 ${nOk}）</p>
+    <p class="acc-note">已标注 ${nFix+nOk} 句（修正 ${nFix}，确认 ${nOk}）${pack.data&&Object.keys(pack.data.model).length?` · 本地模型已复核 ${Object.keys(pack.data.model).length} 章（含其他设备同步来的）`:''}</p>
     <div class="acc-acts"><button class="btn" id="accExport">导出标注</button><label class="btn" for="accImport">导入标注</label><input type="file" id="accImport" accept=".json,application/json" hidden></div>
   </div>`;
 }
 function drawSheet(){
   const st=sheetState;if(!st)return;const f=fixes.get();const el=$('#sheet');
   const search=st.q||'';
+  if(st.form){drawCharForm(st,el);return}
   if(st.mode==='pick'){
     const curC=st.current?castById(st.current):null;
     const rows=castRows(search,f).map(c=>`<button class="pick${c.id===st.current?' cur':''}" data-id="${esc(c.id)}">${avHTML(c)}<span class="nm">${esc(c.name)}</span><span class="meta">${c.lines} 句</span></button>`).join('');
@@ -711,8 +792,9 @@ function drawSheet(){
       <div class="quote">${esc(st.quote||'')}</div>
       ${curC?`<div class="scope"><label><input type="radio" name="scope" value="line" ${st.scope!=='all'?'checked':''}>只改这一句</label><label><input type="radio" name="scope" value="all" ${st.scope==='all'?'checked':''}>本书所有「${esc(curC.name)}」都改</label></div>`:''}
       <input id="sheetSearch" placeholder="搜索角色…" value="${esc(search)}" autocomplete="off"></header>
-      <div id="sheetList">${rows||'<div class="pick"><span class="nm">没有匹配的角色</span></div>'}
-        <button class="pick" data-id=""><span class="av" aria-hidden="true">?</span><span class="nm">未知 / 不是这些角色</span></button></div>
+      <div id="sheetList">${addRow(search)}${rows||'<div class="pick"><span class="nm">没有匹配的角色</span></div>'}
+        <button class="pick" data-id=""><span class="av" aria-hidden="true">?</span><span class="nm">未知 / 不是这些角色</span></button>
+        ${search.trim()?'':'<button class="pick add" data-addname=""><span class="av add-av" aria-hidden="true">＋</span><span class="nm">列表里没有？添加新角色</span></button>'}</div>
       <footer><span>修正会让本章前后的判断一起更新</span>${st.manual?'<button class="btn" id="sheetReset">恢复自动识别</button>':''}</footer>`;
   }else{
     const tab=st.tab||'cast';
@@ -725,10 +807,10 @@ function drawSheet(){
         const merged=Object.keys(f.merge).filter(k=>f.merge[k]===c.id).map(k=>castById(k)).filter(Boolean).map(x=>x.name);
         const al=[...(c.aliases||[]),...merged];
         return `<div class="pick${f.hide[c.id]?' hidden-c':''}">${avHTML(c)}<span class="nm" title="${esc(al.join('、'))}">${esc(c.name)}${al.length?`<span class="meta"> · ${esc(al.slice(0,2).join('、'))}${al.length>2?'…':''}</span>`:''}</span><span class="meta">${c.lines} 句</span>
-          <span class="acts"><button class="btn" data-merge="${esc(c.id)}">合并到…</button><button class="btn" data-hide="${esc(c.id)}">${f.hide[c.id]?'恢复':'不是角色'}</button></span></div>`;
+          <span class="acts">${c.custom?`<span class="badge">手动添加</span><button class="btn" data-edit="${esc(c.id)}">编辑</button><button class="btn" data-del="${esc(c.id)}">删除</button>`:`<button class="btn" data-merge="${esc(c.id)}">合并到…</button><button class="btn" data-hide="${esc(c.id)}">${f.hide[c.id]?'恢复':'不是角色'}</button>`}</span></div>`;
       }).join('');
       head=(st.mergeFrom?'<div class="quote">合并后，这本书里它的所有对话都算作所选角色，并使用所选角色的颜色和头像。</div>':`<div class="quote">按说话次数排列，共 ${dlg.cast.list.length} 个。颜色和头像由书本内容决定，所有章节、所有设备上都一致。</div>`)+
-        `<input id="sheetSearch" placeholder="搜索角色…" value="${esc(search)}" autocomplete="off">`;
+        `<div class="srow"><input id="sheetSearch" placeholder="搜索角色…" value="${esc(search)}" autocomplete="off">${st.mergeFrom?'':'<button class="btn" data-addname="">＋ 添加角色</button>'}</div>`;
       body=st.mergeFrom?castRows(search,f).filter(c=>c.id!==st.mergeFrom).map(c=>`<button class="pick" data-into="${esc(c.id)}">${avHTML(c)}<span class="nm">${esc(c.name)}</span><span class="meta">${c.lines} 句</span></button>`).join(''):rows;
     }
     el.innerHTML=`<header><h3 id="sheetTitle">${st.mergeFrom?`把「${esc(castById(st.mergeFrom).name)}」合并到…`:'角色与标注'}<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3>${tabs}${head}</header>
@@ -740,7 +822,7 @@ function drawSheet(){
   if(inp)inp.oninput=e=>{st.q=e.target.value;const pos=e.target.selectionStart;drawSheet();const i2=$('#sheetSearch');i2.focus();i2.setSelectionRange(pos,pos)};
   el.querySelectorAll('input[name=scope]').forEach(r=>r.onchange=()=>{st.scope=r.value});
   const reset=$('#sheetReset');if(reset)reset.onclick=()=>{const f2=fixes.get();delete f2.line[st.key];delete f2.ok[st.key];delete f2.meta[st.key];fixes.set(f2);closeSheet();rerender()};
-  const ra=$('#sheetResetAll');if(ra)ra.onclick=()=>{const b=document.createElement('span');ra.replaceWith(b);b.innerHTML='确定清除？ <button class="btn" id="raYes">清除</button> <button class="btn" id="raNo">取消</button>';$('#raYes').onclick=()=>{fixes.set(fixes.blank());drawSheet();rerender()};$('#raNo').onclick=drawSheet};
+  const ra=$('#sheetResetAll');if(ra)ra.onclick=()=>{const b=document.createElement('span');ra.replaceWith(b);b.innerHTML='确定清除？ <button class="btn" id="raYes">清除</button> <button class="btn" id="raNo">取消</button>';$('#raYes').onclick=()=>{const f0=fixes.get();fixes.set(Object.assign(fixes.blank(),{ts:f0.ts,tomb:f0.tomb}));drawSheet();rerender()};$('#raNo').onclick=drawSheet};
   const ex=$('#accExport');if(ex)ex.onclick=exportLabels;
   const im=$('#accImport');if(im)im.onchange=e=>importLabels(e.target.files[0]);
 }
@@ -774,18 +856,25 @@ function importLabels(file){
       if(doc.book&&doc.book.id&&doc.book.id!==book.id){toast('这个标注文件属于另一本书');return}
       const f=fixes.get(),src=doc.fixes||{};
       let n=0;
-      for(const k of ['line','ok','meta','merge','hide'])for(const [kk,v] of Object.entries(src[k]||{}))if(!has(f[k],kk)){f[k][kk]=v;n++}
+      for(const k of ['line','ok','meta','merge','hide','chars'])for(const [kk,v] of Object.entries(src[k]||{}))if(!has(f[k],kk)){f[k][kk]=v;n++}
       if(!doc.fixes&&doc.labels){                         /* plain labels file (e.g. tests/labels-*.json): names → cast ids */
         const byName=new Map();for(const c of dlg.cast.list){byName.set(c.name,c.id);for(const a of c.aliases||[])if(!byName.has(a))byName.set(a,c.id)}
         for(const [k,name] of Object.entries(doc.labels))if(!has(f.line,k)&&!has(f.ok,k)){f.line[k]=byName.get(name)||'';n++}
       }
-      fixes.set(f);drawSheet();rerender();toast(`已导入 ${n} 条标注`);
+      fixes.set(f);applyCustom(false).then(()=>{drawSheet();rerender();toast(`已导入 ${n} 条标注`)});
     }catch(e){toast('无法读取这个文件，请选择导出的 JSON 标注文件')}
   };
   r.readAsText(file);
 }
 $('#sheet').onclick=e=>{
   const st=sheetState;if(!st)return;const f=fixes.get();
+  if(st.form)return;                                   /* the form wires its own buttons */
+  const add=e.target.closest('[data-addname]');
+  if(add){st.form={id:null,name:add.dataset.addname||(st.q||'').trim(),aliases:'',err:''};drawSheet();return}
+  const ed=e.target.closest('[data-edit]');
+  if(ed){const c=f.chars[ed.dataset.edit];if(c){st.form={id:ed.dataset.edit,name:c.name,aliases:(c.aliases||[]).join('、'),err:''};drawSheet()}return}
+  const del=e.target.closest('[data-del]');
+  if(del){st.form={id:del.dataset.del,confirmDelete:true};drawSheet();return}
   const tb=e.target.closest('[data-tab]');
   if(tb){st.tab=tb.dataset.tab;st.q='';drawSheet();return}
   const pick=e.target.closest('[data-id]');
@@ -804,6 +893,71 @@ $('#sheet').onclick=e=>{
   const into=e.target.closest('[data-into]');
   if(into&&st.mergeFrom){f.merge[st.mergeFrom]=into.dataset.into;fixes.set(f);st.mergeFrom=null;st.q='';drawSheet();rerender();return}
 };
+function addRow(search){
+  const q=(search||'').trim();
+  if(!q||!dlg.cast||dlg.cast.list.some(c=>c.name===q||(c.aliases||[]).includes(q)))return '';
+  return `<button class="pick add" data-addname="${esc(q)}"><span class="av add-av" aria-hidden="true">＋</span><span class="nm">添加新角色「${esc(q)}」</span></button>`;
+}
+/* who already uses a name: another cast member, or nobody */
+function nameOwner(n,exceptId){
+  for(const c of dlg.cast.list)if(c.id!==exceptId&&(c.name===n||(c.aliases||[]).includes(n)))return c;
+  return null;
+}
+function drawCharForm(st,el){
+  const fm=st.form;
+  if(fm.confirmDelete){
+    const c=castById(fm.id),f=fixes.get(),n=Object.values(f.line).filter(v=>v===fm.id).length+Object.values(f.ok).filter(v=>v===fm.id).length;
+    el.innerHTML=`<header><h3 id="sheetTitle">删除角色「${esc(c?c.name:'')}」？<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3></header>
+      <div class="cform"><p class="acc-note">删除后，${n?`你标给他的 ${n} 句会退回自动识别，`:''}全书会重新识别一次。</p>
+      <div class="acc-acts"><button class="btn danger" id="cfDel">删除</button><button class="btn" id="cfBack">返回</button></div></div>`;
+    $('#cfDel').onclick=()=>deleteChar(fm.id);$('#cfBack').onclick=()=>{st.form=null;drawSheet()};
+    $('#sheetX').onclick=closeSheet;return;
+  }
+  const editing=!!fm.id,forLine=st.mode==='pick'&&!editing;
+  el.innerHTML=`<header><h3 id="sheetTitle">${editing?'编辑角色':'添加新角色'}<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3>
+      ${forLine?`<div class="quote">${esc(st.quote||'')}</div>`:''}</header>
+    <form class="cform" id="cform" novalidate>
+      <label for="cfName">名字</label><input id="cfName" value="${esc(fm.name||'')}" maxlength="16" autocomplete="off" placeholder="例如：胡安娜">
+      <label for="cfAlias">别名（可选，用顿号或逗号分隔）</label><input id="cfAlias" value="${esc(fm.aliases||'')}" autocomplete="off" placeholder="例如：负责登记的女士、胡安娜小姐">
+      <p class="acc-note">${editing?'保存后全书会重新识别。':'添加后会重新识别全书：凡是写明这个名字或别名说话的地方，都会自动归给这个角色。'}</p>
+      ${fm.err?`<p class="cf-err" role="alert">${esc(fm.err)}</p>`:''}
+      <div class="acc-acts"><button class="btn primary" type="submit">${editing?'保存':forLine?'添加并设为这句的说话人':'添加'}</button><button class="btn" type="button" id="cfBack">返回</button></div>
+    </form>`;
+  $('#sheetX').onclick=closeSheet;
+  $('#cfBack').onclick=()=>{st.form=null;drawSheet()};
+  $('#cform').onsubmit=e=>{e.preventDefault();saveChar(st)};
+  for(const id of ['#cfName','#cfAlias'])$(id).oninput=()=>{fm.err='';const er=document.querySelector('.cf-err');if(er)er.remove()};
+  const n=$('#cfName');if(n&&!isTouch)n.focus();
+}
+async function saveChar(st){
+  const fm=st.form,name=$('#cfName').value.trim().replace(/\s+/g,'');
+  const aliases=[...new Set($('#cfAlias').value.split(/[，,、;；\s]+/).map(x=>x.trim()).filter(x=>x&&x!==name))];
+  fm.name=name;fm.aliases=aliases.join('、');
+  if(!name){fm.err='请填写名字';drawSheet();return}
+  if(/[“”「」『』：:，,。！？]/.test(name)){fm.err='名字里不能有标点';drawSheet();return}
+  const owner=nameOwner(name,fm.id);
+  if(owner){fm.err=`「${name}」已经是角色「${owner.name}」，可以直接在列表里选它`;drawSheet();return}
+  const clash=aliases.map(a=>[a,nameOwner(a,fm.id)]).find(x=>x[1]);
+  if(clash){fm.err=`别名「${clash[0]}」已经属于「${clash[1].name}」`;drawSheet();return}
+  const f=fixes.get(),id=fm.id||('+'+name+'.'+Date.now().toString(36));
+  f.chars[id]={name,aliases};fixes.set(f);
+  const editing=!!fm.id,key=st.key,forLine=st.mode==='pick'&&!editing;
+  closeSheet();
+  const extra=await applyCustom(false)||[];
+  if(forLine)labelLines([key],id,'fix');else rerender();
+  const c=extra.find(x=>x.id===id);
+  toast(`${editing?'已保存':'已添加'}「${esc(name)}」：全书共识别出 ${(c?c.lines:0)+(forLine?1:0)} 句${forLine?'（含这一句）':''}`);
+}
+async function deleteChar(id){
+  const f=fixes.get(),c=castById(id);
+  delete f.chars[id];
+  for(const k of Object.keys(f.line))if(f.line[k]===id){delete f.line[k];delete f.meta[k]}
+  for(const k of Object.keys(f.ok))if(f.ok[k]===id){delete f.ok[k];delete f.meta[k]}
+  for(const k of Object.keys(f.merge))if(f.merge[k]===id||k===id)delete f.merge[k];
+  fixes.set(f);closeSheet();
+  await applyCustom(false);rerender();
+  toast(`已删除「${esc(c?c.name:'')}」`);
+}
 function rerender(){if(!book)return;const pos=curPos();render(pos.ch,pos.p)}
 $('#main').addEventListener('click',e=>{
   if(!dlgReady())return;
@@ -971,15 +1125,15 @@ const drive={
     for(const f of j.files||[]){if(!ids[f.name]||f.modifiedTime>mt[f.name]){ids[f.name]=f.id;mt[f.name]=f.modifiedTime}}
     return this.ids=ids;
   },
-  async get(bookId){
-    const name=bookId+'.json';
+  get(bookId){return this.getFile(bookId+'.json')},
+  put(bookId,body){return this.putFile(bookId+'.json',body)},
+  async getFile(name){
     if(!this.ids||!this.ids[name])await this.list();
     const id=this.ids[name];if(!id)return null;
     try{return await (await gfetch(`${DRIVE}/${id}?alt=media`)).json()}
     catch(e){if(e.code==='http'&&e.status===404){this.ids=null;return null}throw e}
   },
-  async put(bookId,body){
-    const name=bookId+'.json';
+  async putFile(name,body){
     if(!this.ids)await this.list();
     const id=this.ids[name],json=JSON.stringify(body);
     if(id){
@@ -1005,7 +1159,7 @@ const dirty={get(){return store.get('dirty',{})},add(id){const d=this.get();d[id
 const SYNC_UI={
   signedout:['连接同步','用 Google 账号在各设备间同步阅读进度'],
   renew:['重新连接','登录已过期，点击重新连接 Google 同步'],
-  ok:['☁ 已同步','进度已保存到你的 Google Drive'],
+  ok:['☁ 已同步','阅读进度、对话标注和识别结果已保存到你的 Google Drive'],
   saving:['☁ 同步中…','正在保存进度'],
   err:['同步失败','暂时连不上 Google，稍后自动重试'],
 };
@@ -1085,11 +1239,100 @@ async function checkRemote(local){
   toast(`你${where}读到 ${label}`,'跳转',()=>jumpTo(r));
 }
 function jumpTo(r){if(book)sync.lastPushed=sigOf(book.id,{ch:r.ch,p:r.p||0});render(r.ch,r.p||0)}
-function onBookOpened(rec){sync.openRec=rec;sync.checked='';hideToast();checkRemote(rec)}
+
+/* ---------- dialogue recognition sync: <bookId>.dialogue.json ----------
+   Carries the reader's labels (with timestamps and tombstones) and the model's answers per chapter.
+   Positions and names only: the text snippets kept for labels never leave the device.
+   Every write is read → merge → write, so two devices editing at the same time both keep their changes. */
+const dlgSync={
+  busy:false,again:false,timer:0,last:0,
+  file(){return book.id+'.dialogue.json'},
+  dirty(){clearTimeout(this.timer);if(sync.on&&book)this.timer=setTimeout(()=>this.push(),4000)},
+  /* local label store → per-entry records */
+  toRecords(f){
+    const L={},O={};
+    for(const k of new Set([...Object.keys(f.line),...Object.keys(f.ok)]))
+      L[k]={k:has(f.line,k)?'fix':'ok',v:has(f.line,k)?f.line[k]:f.ok[k],t:f.ts[k]||0,
+            m:f.meta[k]?{rule:f.meta[k].rule,ruleConf:f.meta[k].ruleConf,model:f.meta[k].model}:undefined};
+    for(const [k,t] of Object.entries(f.tomb))(/^[mhc]:/.test(k)?O:L)[k]={k:'del',t};
+    for(const [id,v] of Object.entries(f.chars||{}))O['c:'+id]={v,t:f.ts['c:'+id]||0};
+    for(const [id,v] of Object.entries(f.merge))O['m:'+id]={v,t:f.ts['m:'+id]||0};
+    for(const id of Object.keys(f.hide))O['h:'+id]={v:true,t:f.ts['h:'+id]||0};
+    return {labels:L,ops:O};
+  },
+  fromRecords(R,keepMeta){
+    const f=fixes.blank();
+    for(const [k,r] of Object.entries(R.labels||{})){
+      if(r.k==='del'){f.tomb[k]=r.t;continue}
+      (r.k==='fix'?f.line:f.ok)[k]=r.v;f.ts[k]=r.t;
+      const m=keepMeta[k]||r.m;if(m)f.meta[k]=m;
+    }
+    for(const [k,r] of Object.entries(R.ops||{})){
+      if(r.k==='del'){f.tomb[k]=r.t;continue}
+      if(k.startsWith('m:'))f.merge[k.slice(2)]=r.v;else if(k.startsWith('c:'))f.chars[k.slice(2)]=r.v;else f.hide[k.slice(2)]=true;
+      f.ts[k]=r.t;
+    }
+    return f;
+  },
+  /* newest entry wins, deletions included */
+  mergeRecords(a,b){
+    const out={labels:{},ops:{}};
+    for(const part of ['labels','ops'])for(const src of [a[part]||{},b[part]||{}])
+      for(const [k,r] of Object.entries(src))if(!out[part][k]||r.t>out[part][k].t)out[part][k]=r;
+    return out;
+  },
+  mergeModel(local,remote){
+    if(!remote||!remote.model)return false;
+    if(!local.engine||!local.castHash||(local.engine===remote.engine&&local.castHash===remote.castHash)){
+      let changed=false;
+      if(!local.castHash){local.engine=remote.engine;local.castHash=remote.castHash}
+      for(const [ci,e] of Object.entries(remote.model))if(!local.model[ci]||e.t>local.model[ci].t){local.model[ci]=e;changed=true}
+      return changed;
+    }
+    return false;                    /* different engine or cast: the other device's answers don't apply here */
+  },
+  /* fetch the remote file and merge it into this device; returns the merged document to write back */
+  async pull(){
+    if(!sync.on||!book)return null;
+    const id=book.id;let remote;
+    try{remote=await withRetry(()=>drive.getFile(id+'.dialogue.json'))}catch(e){syncError(e);return null}
+    if(!book||book.id!==id)return null;
+    const f=fixes.get(),mine=this.toRecords(f);
+    const merged=this.mergeRecords(mine,remote||{});
+    const before=JSON.stringify(mine),changedLabels=JSON.stringify(merged)!==before&&remote;
+    const charsBefore=JSON.stringify(f.chars||{});
+    if(changedLabels)fixes.setRaw(this.fromRecords(merged,f.meta));
+    if(changedLabels&&JSON.stringify(fixes.get().chars)!==charsBefore&&dlg.data)await applyCustom();
+    if(!pack.data||pack.data.bookId!==id)await loadPack();
+    const changedModel=remote?this.mergeModel(pack.data,remote):false;
+    if(changedModel)savePack();
+    if((changedLabels||changedModel)&&dlgReady()&&S.dialogue)rerender();
+    if(changedModel&&!llmOn()&&S.dialogue){const n=Object.keys(remote.model||{}).length;if(n)setLlmStat(`已同步其他设备的识别结果（${n} 章）`)}
+    this.last=Date.now();
+    return {merged,remote};
+  },
+  async push(){
+    clearTimeout(this.timer);
+    if(!sync.on||!book)return;
+    if(this.busy){this.again=true;return}
+    this.busy=true;setSync('saving');
+    try{
+      const r=await this.pull();if(!r)return;
+      if(!pack.data)await loadPack();
+      const doc={v:1,bookId:book.id,engine:pack.data.engine,castHash:pack.data.castHash,model:pack.data.model,
+                 labels:r.merged.labels,ops:r.merged.ops,dev:DEV,t:Date.now()};
+      if(JSON.stringify({l:doc.labels,o:doc.ops,m:doc.model})!==JSON.stringify({l:(r.remote||{}).labels||{},o:(r.remote||{}).ops||{},m:(r.remote||{}).model||{}}))
+        await withRetry(()=>drive.putFile(this.file(),doc));
+      setSync('ok');
+    }catch(e){syncError(e)}
+    finally{this.busy=false;if(this.again){this.again=false;this.push()}}
+  },
+};
+function onBookOpened(rec){sync.openRec=rec;sync.checked='';hideToast();pack.data=null;checkRemote(rec).then(()=>dlgSync.pull())}
 function onResume(){
   if(!book)return;
   if(sync.on&&!auth.valid()){sync.on=false;setSync('renew');return}
-  if(sync.on&&sync.checked===book.id)checkRemote(store.get('progress',{})[book.id]||null);
+  if(sync.on&&sync.checked===book.id)checkRemote(store.get('progress',{})[book.id]||null).then(()=>dlgSync.pull());
   else if(sync.on)flush();
 }
 window.addEventListener('online',()=>{if(sync.on)flush()});
@@ -1121,7 +1364,7 @@ async function initSync(){
     setSync('renew');return
   }
   sync.on=true;setSync('ok');
-  if(book)checkRemote(sync.openRec);else flush();
+  if(book)checkRemote(sync.openRec).then(()=>{dlgSync.pull();dlgSync.dirty()});else flush();
 }
 initSync();
 
