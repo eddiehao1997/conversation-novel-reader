@@ -570,7 +570,39 @@
     return { paras: out, tail: { recent, lastMention, lastSubject, subjHist, shortRun, lastWasDialogue, run } };
   }
 
-  const api = { VERSION, segment, buildCast, attributeChapter, makeMatcher, parseWords };
+  /* Characters the reader adds by hand (names the cast missed, e.g. a minor character).
+     customs: [{id, name, aliases}]. The id is fixed when the character is created, so a rename keeps every label;
+     colour and avatar come from the id, so they are the same on every device and the existing cast is untouched.
+     Returns the extra cast entries, the per-chapter context for the whole book recomputed with them,
+     and how many lines each one now speaks. */
+  function extendCast(chapters, baseList, customs) {
+    const taken = new Set(baseList.flatMap(c => [c.name, ...(c.aliases || [])]));
+    const extra = [];
+    for (const c of customs || []) {
+      if (!c || !c.id || !c.name || taken.has(c.name)) continue;
+      const e = { id: c.id, name: c.name, aliases: (c.aliases || []).filter(a => a && a !== c.name && !taken.has(a)),
+                  custom: true, lines: 0, count: 0, rank: baseList.length + extra.length };
+      Object.assign(e, look(e, 999));
+      for (const n of [e.name, ...e.aliases]) taken.add(n);
+      extra.push(e);
+    }
+    const list = baseList.concat(extra);
+    const cast = { list, matcher: makeMatcher(list) };
+    const paras = chapters.flatMap(ch => ch.paras);
+    if (extra.length) estimateGender(paras, extra, cast.matcher);
+    const tails = [], counts = {}, isExtra = new Set(extra.map(e => e.id));
+    let tail = null;
+    for (const ch of chapters) {
+      tails.push(tail);
+      const r = attributeChapter(ch, cast, tail); tail = r.tail;
+      for (const segs of r.paras) for (const sg of segs)
+        if (sg.t === 'q' && sg.spoken && sg.speaker && isExtra.has(sg.speaker)) counts[sg.speaker] = (counts[sg.speaker] || 0) + 1;
+    }
+    for (const e of extra) e.lines = counts[e.id] || 0;
+    return { extra, tails };
+  }
+
+  const api = { VERSION, segment, buildCast, attributeChapter, makeMatcher, parseWords, extendCast };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Dialogue = api;
 })(typeof window !== 'undefined' ? window : globalThis);
