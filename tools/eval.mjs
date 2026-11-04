@@ -103,6 +103,7 @@ for (const [ci, items] of [...byCh].sort((a, b) => a[0] - b[0])) {
     if (mres && mres[it.pi + ':' + it.qi] !== undefined && s.conf !== 'explicit') {
       const m = mres[it.pi + ':' + it.qi]; const mv = m ? C(byId.get(m).name) : null;
       bump('model', mv === want);
+      bump('model on ' + (s.conf || 'none'), mv === want);
       if (m) { fin = mv; finSrc = 'model' }
     }
     if (fin === want) finalOk++;
@@ -115,8 +116,8 @@ for (const [ci, items] of [...byCh].sort((a, b) => a[0] - b[0])) {
 }
 const pct = (a, b) => b ? (a / b * 100).toFixed(1) + '%' : '-';
 console.log(`\nlabels ${total}, matched to detected lines ${total - missing}${missing ? ` (${missing} not found as lines)` : ''}\n`);
-console.log('source            lines   correct');
-for (const k of ['rule:explicit', 'rule:context', 'rule:inferred', 'rule:none', 'model']) if (stat[k]) console.log(`${k.padEnd(16)} ${String(stat[k].n).padStart(6)}   ${pct(stat[k].ok, stat[k].n)}`);
+console.log('source              lines   correct');
+for (const k of ['rule:explicit', 'rule:context', 'rule:inferred', 'rule:none', 'model', 'model on context', 'model on inferred', 'model on none']) if (stat[k]) console.log(`${k.padEnd(18)} ${String(stat[k].n).padStart(6)}   ${pct(stat[k].ok, stat[k].n)}`);
 console.log(`\noverall correct      ${pct(finalOk, total - missing)}  (unknown counts as correct only when the speaker is outside the cast)`);
 console.log(`named lines correct  ${pct(finalNamedOk, finalNamed)}  (${finalNamed} of ${total - missing} lines got a name)`);
 console.log('\nmost common mistakes (truth ← shown):');

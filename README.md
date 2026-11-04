@@ -9,7 +9,7 @@
 - 离线可用：Service Worker 缓存应用本身，书存在本机的 IndexedDB 里
 - 电脑版 Chrome / Edge 安装后，可以把 .txt 文件直接拖进来或用「打开方式」打开
 - **同步的只有阅读位置**（章节、段落、百分比），书的内容不会上传
-- **对话气泡（实验功能）**：在设置里打开后，自动识别每句对话的说话人，用角色专属的颜色和头像显示成对话框，点头像可以修正。详见 [docs/dialogue-bubbles.md](docs/dialogue-bubbles.md)
+- **对话气泡（实验功能）**：在设置里打开后，自动识别每句对话的说话人，用角色专属的颜色和头像显示成对话框。拿不准的句子可以交给电脑上的本地模型（Ollama）复核；读者点 ✓ 确认或点头像修正后，可以在「准确率」页看到规则和模型的实际准确率。详见 [docs/dialogue-bubbles.md](docs/dialogue-bubbles.md)
 
 ## 文件结构
 
@@ -21,6 +21,9 @@ sw.js                  Service Worker（离线缓存）
 dialogue.js            对话气泡引擎：识别角色、判断说话人（纯本地）
 dialogue-worker.js     在后台线程分析整本书
 dialogue-words.txt     常用词表（来自 jieba 词典，MIT 许可），用来排除非人名
+llm.js                 本地模型（Ollama）复核：提示词、JSON Schema 限定答案、结果校验
+tools/eval.mjs         评测脚本：node tools/eval.mjs book.txt labels.json [--ollama 模型]
+tests/labels-guimi.json  评测集：6 章 232 句人工标注（只有位置和人名）
 icons/                 应用图标
 .nojekyll              让 GitHub Pages 原样发布这些文件
 ```
@@ -87,6 +90,17 @@ icons/                 应用图标
 - 发生冲突时以最后一次写入为准，较新的远端进度只会提示，不会强制跳转。
 - 登录方式是 OAuth 重定向（不用弹窗，在 iOS 主屏幕 App 里也能用）。登录令牌约 1 小时有效，过期后下次打开 App 会自动经过 Google 续期（一闪而过）；如果续期失败，顶栏会显示 **重新连接**。
 - 想清除同步数据：Google Drive → 设置 → **管理应用** → 找到这个应用 → **删除隐藏的应用数据**。
+
+## 四、（可选）本地模型复核对话说话人
+
+1. 在电脑上安装 [Ollama](https://ollama.com)，然后执行 `ollama pull qwen2.5:7b`（需要约 5GB 空间；建议 16GB 内存）。
+2. 用下面的方式启动，允许阅读器访问：
+   ```bash
+   OLLAMA_ORIGINS="https://eddiehao1997.github.io,null" ollama serve
+   ```
+   `null` 对应双击打开的单文件版。Mac 上如果用的是 Ollama App，先执行 `launchctl setenv OLLAMA_ORIGINS "https://eddiehao1997.github.io,null"`，再重启 App。
+3. 在阅读器里依次点 Aa → 对话气泡 → 本地模型复核 → 测试连接。
+4. 想量化效果，可以运行 `node tools/eval.mjs 你的书.txt tests/labels-guimi.json --ollama qwen2.5:7b`。
 
 ## 限制
 
