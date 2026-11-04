@@ -221,7 +221,7 @@ main .dl-narr{margin:0 0 .6em}
     <div class="row"><label for="llmHost">地址</label><input id="llmHost" class="inp" spellcheck="false" autocomplete="off"></div>
     <div class="row"><label for="llmModel">模型</label><input id="llmModel" class="inp" list="llmModels" spellcheck="false" autocomplete="off"><datalist id="llmModels"></datalist></div>
     <div class="row"><button class="btn" id="llmTest">测试连接</button><span id="llmTestOut" class="note-inline"></span></div>
-    <div class="note">用电脑上的 Ollama 复核规则拿不准的句子，不联网。启动方法：<code>OLLAMA_ORIGINS="https://eddiehao1997.github.io,null" ollama serve</code>（null 对应双击打开的单文件版），再 <code>ollama pull qwen2.5:7b</code>。手机上不可用，会自动只用规则。</div>
+    <div class="note">用电脑上的 Ollama 复核规则拿不准的句子，不联网。启动方法：<code>OLLAMA_ORIGINS="https://eddiehao1997.github.io" ollama serve</code>（Mac 用 App 的话先运行 <code>launchctl setenv OLLAMA_ORIGINS "https://eddiehao1997.github.io"</code>，再重启 Ollama），再 <code>ollama pull qwen2.5:7b</code>。只有 GitHub Pages 网站版能用；手机和双击打开的单文件版会自动只用规则。</div>
   </div>
   <div class="row">主题
     <span class="swatches">
@@ -835,7 +835,7 @@ async function testLLM(quiet){
     out.textContent=okModel?`已连接 · ${S.llmModel}`:(models.length?`已连接，但没有 ${S.llmModel}；可选：${models.slice(0,3).join('、')}`:`已连接，但还没有模型，请先 ollama pull ${S.llmModel}`);
     if(okModel){llm.err=null;if(book&&dlgReady())llmPump()}
   }catch(e){
-    out.textContent=e&&e.code==='unreachable'?'连接不上：请确认 Ollama 已启动，并设置了 OLLAMA_ORIGINS':'连接失败';
+    out.textContent=location.protocol==='file:'?'单文件版连不上本地模型，请用 GitHub Pages 网站版':e&&e.code==='unreachable'?'连接不上：请确认 Ollama 已启动，并设置了 OLLAMA_ORIGINS':'连接失败';
   }
 }
 $('#shade').addEventListener('click',()=>{if(sheetState)closeSheet()});

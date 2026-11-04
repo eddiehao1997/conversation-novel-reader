@@ -100,9 +100,9 @@ node tools/eval.mjs 诡秘之主.txt tests/labels-guimi.json [--ollama qwen2.5:7
 - **出错时**：连接失败或没有安装模型时提示一次，不会反复重试，并退回只用规则。
 - **启用方法**：
   1. 在电脑上安装 Ollama，执行 `ollama pull qwen2.5:7b`；
-  2. 用 `OLLAMA_ORIGINS="https://eddiehao1997.github.io,null" ollama serve` 启动，其中 null 对应双击打开的单文件版；
+  2. 用 `OLLAMA_ORIGINS="https://eddiehao1997.github.io" ollama serve` 启动（不要加 `null`，Ollama 会拒绝启动）。所以单文件版（file://，来源为 null）用不了本地模型；
   3. 在阅读器里依次点 Aa → 对话气泡 → 本地模型复核，然后测试连接。
-- 手机和 claude.ai 链接版访问不了本机的 Ollama，会自动只用规则。
+- 手机、claude.ai 链接版和单文件版都访问不了本机的 Ollama，会自动只用规则。
 
 ### ⑤ 读者标注与验证
 
