@@ -750,11 +750,20 @@ function exportLabels(){
   for(const [k,v] of Object.entries(f.ok)){const c=castById(resolveSpeaker(v,f));labels[k]=c?c.name:''}
   for(const [k,v] of Object.entries(f.line)){const c=castById(resolveSpeaker(v||null,f));labels[k]=c?c.name:''}
   const doc={format:'novel-reader-labels/1',book:{id:book.id,title:book.name},exported:new Date().toISOString(),labels,fixes:f};
+  const name=`${book.name}-对话标注.json`,data=JSON.stringify(doc,null,1);
+  saveFile(name,data).then(ok=>{if(ok)toast('已导出标注文件')});
+}
+/* hosted inside claude.ai the page must ask the viewer to save; everywhere else a normal download link works */
+async function saveFile(filename,data){
+  try{
+    const d=window.claude&&typeof window.claude.use==='function'?await window.claude.use('downloads'):null;
+    if(d){await d.save({filename,data});return true}
+  }catch(e){if(e&&e.code&&e.code!=='not_granted'&&e.code!=='capability_disabled')return false}
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([JSON.stringify(doc,null,1)],{type:'application/json'}));
-  a.download=`${book.name}-对话标注.json`;document.body.appendChild(a);a.click();
+  a.href=URL.createObjectURL(new Blob([data],{type:'application/json'}));
+  a.download=filename;document.body.appendChild(a);a.click();
   setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);
-  toast('已导出标注文件');
+  return true;
 }
 function importLabels(file){
   if(!file)return;
