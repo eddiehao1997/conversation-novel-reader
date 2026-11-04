@@ -94,11 +94,17 @@ icons/                 应用图标
 ## 四、（可选）本地模型复核对话说话人
 
 1. 在电脑上安装 [Ollama](https://ollama.com)，然后执行 `ollama pull qwen2.5:7b`（需要约 5GB 空间；建议 16GB 内存）。
-2. 用下面的方式启动，允许阅读器访问：
-   ```bash
-   OLLAMA_ORIGINS="https://eddiehao1997.github.io,null" ollama serve
-   ```
-   `null` 对应双击打开的单文件版。Mac 上如果用的是 Ollama App，先执行 `launchctl setenv OLLAMA_ORIGINS "https://eddiehao1997.github.io,null"`，再重启 App。
+2. 允许阅读器网站访问 Ollama（**不要**加 `null`：Ollama 不认这个值，服务会直接启动失败）：
+   - Mac 用 Ollama App：
+     ```bash
+     launchctl setenv OLLAMA_ORIGINS "https://eddiehao1997.github.io"
+     pkill -f ollama; open -a Ollama
+     ```
+     这个设置在 Mac 重启后会失效，需要重新运行一次。
+   - 用命令行启动：`OLLAMA_ORIGINS="https://eddiehao1997.github.io" ollama serve`
+   - 检查：`curl -s -o /dev/null -w "%{http_code}\n" -H "Origin: https://eddiehao1997.github.io" http://127.0.0.1:11434/api/tags` 返回 `200` 就说明设置好了。
+
+   本地模型只能在 GitHub Pages 网站版里用。双击打开的单文件版连不上 Ollama：它的来源是 `null`，只有设成 `OLLAMA_ORIGINS="*"` 才能放行，但那样任何网页都能调用你的 Ollama，不建议。
 3. 在阅读器里依次点 Aa → 对话气泡 → 本地模型复核 → 测试连接。
 4. 想量化效果，可以运行 `node tools/eval.mjs 你的书.txt tests/labels-guimi.json --ollama qwen2.5:7b`。
 
