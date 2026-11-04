@@ -122,7 +122,12 @@ body.t-dark{--av-l:.64;--av-c:.11;--nm-l:.80;--bub-mix:17%;--bub-line:38%}
   border:1px solid color-mix(in oklab,oklch(var(--av-l) var(--av-c) var(--h)) var(--bub-line),var(--bg));
   border-radius:4px 14px 14px 14px;padding:.4em .8em;max-width:100%;text-align:left;overflow-wrap:anywhere}
 .dl-row.inf .dl-bub{border-style:dashed}
-.dl-tag{font-size:.84em;color:var(--muted);line-height:1.6;padding:0 .2em}
+/* narration and inner monologue inside a dialogue paragraph: plain body text, no special format */
+main .dl-narr{margin:0 0 .6em}
+.dl-row.cont{margin-top:-.45em}
+.dl-row.cont .av{opacity:0}
+.dl-row.cont .av:focus-visible{opacity:1}
+.dl-row.cont .dl-who{display:none}
 .dl-row.unk .av{background:var(--line);color:var(--muted);text-shadow:none}
 .dl-row.unk .dl-who{color:var(--muted)}
 .dl-row.unk .dl-bub{background:var(--panel);border-color:var(--line)}
@@ -454,15 +459,17 @@ function avHTML(c,extra=''){
 function renderDialogue(ci,c){
   const D=window.Dialogue,f=fixes.get();
   const res=D.attributeChapter({paras:c.paras},dlg.cast,dlg.data.tails[ci]||null);
+  let prevEndId;                                 /* speaker whose bubble ended the previous paragraph */
   return res.paras.map((segs,pi)=>{
-    if(!segs.some(isLine))return `<p class="para">${esc(c.paras[pi])}</p>`;
-    /* group into runs: one row per consecutive speaker; narration stays in order as small tags */
-    const rows=[];let cur=null,pending=[],qi=0;
+    if(!segs.some(isLine)){prevEndId=undefined;return `<p class="para">${esc(c.paras[pi])}</p>`}
+    /* sequence of narration lines (plain body text) and rows (one per consecutive speaker) */
+    const seq=[];let qi=0;
     for(const sg of segs){
       if(!isLine(sg)){
         const txt=sg.t==='q'?sg.open+sg.text+sg.close:sg.text;
         if(!txt.trim())continue;
-        if(cur)cur.items.push({tag:txt});else pending.push({tag:txt});
+        const last=seq[seq.length-1];
+        if(last&&last.narr!==undefined)last.narr+=txt;else seq.push({narr:txt});
         continue;
       }
       const key=ci+':'+pi+':'+qi;qi++;
@@ -470,26 +477,22 @@ function renderDialogue(ci,c){
       const raw=manual?(f.line[key]||null):sg.speaker;
       const id=resolveSpeaker(raw,f);
       const conf=manual?'manual':(id?sg.conf:null);
-      if(!cur||cur.id!==id){
-        /* narration between two different speakers belongs to the next one's lead-in */
-        if(cur&&cur.id!==id){const t=[];while(cur.items.length&&cur.items[cur.items.length-1].tag!==undefined)t.unshift(cur.items.pop());pending=t.concat(pending)}
-        cur={id,conf,key,items:pending.slice()};pending=[];rows.push(cur);
-      }
-      cur.items.push({q:sg.text,key});
-      if(conf==='inferred'&&cur.conf!=='inferred'&&cur.conf!=='manual')cur.conf=conf;
+      const last=seq[seq.length-1];
+      if(last&&last.row&&last.id===id){last.qs.push(sg.text);if(conf==='inferred'&&last.conf!=='manual')last.conf=conf}
+      else seq.push({row:true,id,conf,key,qs:[sg.text]});
     }
-    if(pending.length&&cur)cur.items.push(...pending);
-    const html=rows.map(r=>{
-      const ch=r.id?castById(r.id):null;
+    const html=seq.map((it,k)=>{
+      if(it.narr!==undefined)return `<p class="dl-narr">${esc(it.narr)}</p>`;
+      const ch=it.id?castById(it.id):null;
       const label=ch?esc(ch.name):'未知';
-      const cf=r.conf==='inferred'?'<span class="cf">推测</span>':r.conf==='manual'?'<span class="cf">已修正</span>':'';
-      /* adjacent narration pieces (split by an embedded “quoted term”) form one line */
-      const items=[];for(const it of r.items){const last=items[items.length-1];if(it.tag!==undefined&&last&&last.tag!==undefined)last.tag+=it.tag;else items.push({...it})}
-      const body=items.map(it=>it.q!==undefined?`<div class="dl-bub">${esc(it.q)}</div>`:`<span class="dl-tag">${esc(it.tag)}</span>`).join('');
-      return `<div class="dl-row${ch?'':' unk'}${r.conf==='inferred'?' inf':''}"${ch?` style="--h:${ch.hue}"`:''}>
-        <button class="av${ch?' p'+ch.pattern:''}" data-fix="${r.key}" aria-label="更改说话人：${label}">${ch?esc(ch.glyph):'?'}</button>
-        <div class="dl-col"><button class="dl-who" data-fix="${r.key}">${label}${cf}</button>${body}</div></div>`;
+      const cf=it.conf==='inferred'?'<span class="cf">推测</span>':it.conf==='manual'?'<span class="cf">已修正</span>':'';
+      /* a speech running on from the previous paragraph: no repeated avatar/name */
+      const cont=k===0&&it.id&&prevEndId===it.id;
+      return `<div class="dl-row${ch?'':' unk'}${it.conf==='inferred'?' inf':''}${cont?' cont':''}"${ch?` style="--h:${ch.hue}"`:''}>
+        <button class="av${ch?' p'+ch.pattern:''}" data-fix="${it.key}" aria-label="更改说话人：${label}">${ch?esc(ch.glyph):'?'}</button>
+        <div class="dl-col"><button class="dl-who" data-fix="${it.key}">${label}${cf}</button>${it.qs.map(q=>`<div class="dl-bub">${esc(q)}</div>`).join('')}</div></div>`;
     }).join('');
+    const tail=seq[seq.length-1];prevEndId=tail&&tail.row?tail.id:undefined;
     return `<div class="para dlg">${html}</div>`;
   }).join('');
 }

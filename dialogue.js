@@ -19,7 +19,7 @@
  */
 (function (root) {
   'use strict';
-  const VERSION = 2;
+  const VERSION = 3;
   const HAN = '\\u3400-\\u9fff';
   const DOT = '·•‧・';
   const SPEECH = '说道|问道|答道|笑道|叹道|喝道|叫道|喊道|骂道|回道|应道|回答道|开口道|出声道|低声道|轻声道|沉声道|冷声道|厉声道|柔声道|' +
@@ -80,6 +80,9 @@
 
   /* Split a paragraph into ordered segments: {t:'n', text} narration, {t:'q', text, spoken} quote */
   function segment(p, prevEndsColon) {
+    /* multi-paragraph speech: every paragraph opens with “ and only the last one closes it.
+       A paragraph that opens a quote it never closes is speech to its end. */
+    if (isOpenSpeech(p)) return [{ t: 'q', text: p.slice(1), open: p[0], close: '', spoken: true, open_run: true }];
     const segs = []; let last = 0, m, anySpoken = false;
     QUOTE_RE.lastIndex = 0;
     while ((m = QUOTE_RE.exec(p))) {
@@ -98,6 +101,12 @@
     }
     if (last < p.length) segs.push({ t: 'n', text: p.slice(last) });
     return segs;
+  }
+
+  function isOpenSpeech(p) {
+    if (!/^[“「『]/.test(p)) return false;
+    const o = (p.match(/[“「『]/g) || []).length, c = (p.match(/[”」』]/g) || []).length;
+    return o > c;
   }
 
   /* ---------- pass 1: cast ---------- */
@@ -241,6 +250,13 @@
         }
         re.lastIndex = 0; const m = re.exec(t);
         if (m && m.index === 0) return map.get(m[0]);
+        /* short title before the name: 心理医生伊思兰特 / 巨人格罗塞尔 (not 看着X / 对X / 和X) */
+        re.lastIndex = 0; const m4 = re.exec(t);
+        if (m4 && m4.index > 0 && m4.index <= 6) {
+          const pre = t.slice(0, m4.index);
+          if (!/[，,。！？：:“”、的]/.test(pre) && !/[着了过向对和与跟给把被让替帮陪叫找见问看望朝冲盯瞥扫打量]$/.test(pre) &&
+              !/^(?:他|她|它|祂|我|你|您)/.test(pre)) return map.get(m4[0]);
+        }
         const head = t.slice(0, 30), de = head.lastIndexOf('的');
         if (de > 0 && !/^(他|她|它|祂)的/.test(t)) {
           re.lastIndex = de + 1; const m3 = re.exec(t);
@@ -365,6 +381,7 @@
     let lastSubject = prevTail ? prevTail.lastSubject : null;       /* last cast member acting as a sentence subject */
     let shortRun = prevTail ? prevTail.shortRun : 0;                /* consecutive short quote-only turns */
     let lastWasDialogue = prevTail ? prevTail.lastWasDialogue : false;
+    let run = prevTail ? prevTail.run || null : null;              /* open multi-paragraph speech: {id, conf} */
     const paras = chapter.paras;
     const push = id => { if (!id) return; recent = [id, ...recent.filter(x => x !== id)].slice(0, 4) };
     for (let i = 0; i < paras.length; i++) {
@@ -388,6 +405,7 @@
         }
       }
       let paraSpeaker = null, sawQuote = false, narrSinceQuote = '';
+      const cont = run && /^[“「『]/.test(p) ? run : null;         /* this paragraph continues someone's speech */
       for (let k = 0; k < segs.length; k++) {
         const s = segs[k];
         if (s.t === 'th') {
@@ -408,7 +426,11 @@
         let r = null;
         const before = k > 0 && segs[k - 1].t === 'n' ? segs[k - 1].text : '';
         const after = k + 1 < segs.length && segs[k + 1].t === 'n' ? segs[k + 1].text : '';
-        if (before.trim()) r = speakerFromText(before, cast, 'pre');
+        if (k === 0 && cont) {
+          r = cont.id ? { id: cont.id, conf: cont.conf } : null;
+          if (after.trim()) { const r2 = speakerFromText(after, cast, 'post'); if (r2 && r2.id && r2.conf === 'explicit') r = r2 }
+        }
+        if (!r && before.trim()) r = speakerFromText(before, cast, 'pre');
         if ((!r || r.conf === 'inferred') && after.trim()) { const r2 = speakerFromText(after, cast, 'post'); if (r2 && (r2.id || !r)) r = r2 }
         if (!r && k === 0 && prevColon) r = speakerFromText(prev, cast, 'pre');
         if (!r && sawQuote && paraSpeaker && !narrSinceQuote.trim()) r = { id: paraSpeaker, conf: 'context' };
@@ -430,6 +452,8 @@
         else { s.speaker = null; s.conf = null }
         sawQuote = true; narrSinceQuote = '';
       }
+      /* a speech that stays open carries its speaker into the next “ paragraph */
+      run = segs[0] && segs[0].t === 'q' && segs[0].open_run ? { id: segs[0].speaker || null, conf: segs[0].conf || null } : null;
       const hasDialogue = segs.some(s => s.t === 'q' && s.spoken);
       const narrOnly = !hasDialogue;
       if (narrOnly && p.length > 60) recent = recent.slice(0, 2);  /* long narration loosens turn-taking */
@@ -438,7 +462,7 @@
       shortRun = quoteOnly && segs[0].text.length <= 30 ? shortRun + 1 : (hasDialogue && segs[0].t === 'q' && segs.every(x => x.t === 'q' || x.text.length < 30) ? 1 : 0);
       out.push(segs);
     }
-    return { paras: out, tail: { recent, lastMention, lastSubject, shortRun, lastWasDialogue } };
+    return { paras: out, tail: { recent, lastMention, lastSubject, shortRun, lastWasDialogue, run } };
   }
 
   const api = { VERSION, segment, buildCast, attributeChapter, makeMatcher, parseWords };
