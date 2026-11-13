@@ -781,21 +781,32 @@ function accuracyHTML(f){
     <div class="acc-acts"><button class="btn" id="accExport">导出标注</button><label class="btn" for="accImport">导入标注</label><input type="file" id="accImport" accept=".json,application/json" hidden></div>
   </div>`;
 }
-function drawSheet(){
+/* Put new sheet markup on screen. While the reader types in the search box only the list below it is replaced:
+   rebuilding the box itself would cancel a pinyin/IME composition after every keystroke. */
+function paintSheet(el,html,listOnly){
+  if(listOnly&&document.getElementById('sheetSearch')&&document.getElementById('sheetList')){
+    const tmp=document.createElement('div');tmp.innerHTML=html;
+    const fresh=tmp.querySelector('#sheetList');
+    if(fresh){document.getElementById('sheetList').replaceWith(fresh);return true}
+  }
+  el.innerHTML=html;return false;
+}
+function drawSheet(listOnly){
+  listOnly=listOnly===true;                    /* also used directly as a click handler, which passes an event */
   const st=sheetState;if(!st)return;const f=fixes.get();const el=$('#sheet');
   const search=st.q||'';
   if(st.form){drawCharForm(st,el);return}
   if(st.mode==='pick'){
     const curC=st.current?castById(st.current):null;
     const rows=castRows(search,f).map(c=>`<button class="pick${c.id===st.current?' cur':''}" data-id="${esc(c.id)}">${avHTML(c)}<span class="nm">${esc(c.name)}</span><span class="meta">${c.lines} 句</span></button>`).join('');
-    el.innerHTML=`<header><h3 id="sheetTitle">这句话是谁说的？<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3>
+    if(paintSheet(el,`<header><h3 id="sheetTitle">这句话是谁说的？<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3>
       <div class="quote">${esc(st.quote||'')}</div>
       ${curC?`<div class="scope"><label><input type="radio" name="scope" value="line" ${st.scope!=='all'?'checked':''}>只改这一句</label><label><input type="radio" name="scope" value="all" ${st.scope==='all'?'checked':''}>本书所有「${esc(curC.name)}」都改</label></div>`:''}
       <input id="sheetSearch" placeholder="搜索角色…" value="${esc(search)}" autocomplete="off"></header>
       <div id="sheetList">${addRow(search)}${rows||'<div class="pick"><span class="nm">没有匹配的角色</span></div>'}
         <button class="pick" data-id=""><span class="av" aria-hidden="true">?</span><span class="nm">未知 / 不是这些角色</span></button>
         ${search.trim()?'':'<button class="pick add" data-addname=""><span class="av add-av" aria-hidden="true">＋</span><span class="nm">列表里没有？添加新角色</span></button>'}</div>
-      <footer><span>修正会让本章前后的判断一起更新</span>${st.manual?'<button class="btn" id="sheetReset">恢复自动识别</button>':''}</footer>`;
+      <footer><span>修正会让本章前后的判断一起更新</span>${st.manual?'<button class="btn" id="sheetReset">恢复自动识别</button>':''}</footer>`,listOnly))return;
   }else{
     const tab=st.tab||'cast';
     const tabs=st.mergeFrom?'':`<div class="tabs" role="tablist"><button role="tab" class="tab${tab==='cast'?' on':''}" data-tab="cast" aria-selected="${tab==='cast'}">角色</button><button role="tab" class="tab${tab==='acc'?' on':''}" data-tab="acc" aria-selected="${tab==='acc'}">准确率</button></div>`;
@@ -813,13 +824,13 @@ function drawSheet(){
         `<div class="srow"><input id="sheetSearch" placeholder="搜索角色…" value="${esc(search)}" autocomplete="off">${st.mergeFrom?'':'<button class="btn" data-addname="">＋ 添加角色</button>'}</div>`;
       body=st.mergeFrom?castRows(search,f).filter(c=>c.id!==st.mergeFrom).map(c=>`<button class="pick" data-into="${esc(c.id)}">${avHTML(c)}<span class="nm">${esc(c.name)}</span><span class="meta">${c.lines} 句</span></button>`).join(''):rows;
     }
-    el.innerHTML=`<header><h3 id="sheetTitle">${st.mergeFrom?`把「${esc(castById(st.mergeFrom).name)}」合并到…`:'角色与标注'}<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3>${tabs}${head}</header>
+    if(paintSheet(el,`<header><h3 id="sheetTitle">${st.mergeFrom?`把「${esc(castById(st.mergeFrom).name)}」合并到…`:'角色与标注'}<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3>${tabs}${head}</header>
       <div id="sheetList">${body}</div>
-      <footer><span>${n?`已有 ${n} 处修正和确认`:'还没有修正'}</span>${n&&!st.mergeFrom?'<button class="btn" id="sheetResetAll">清除全部修正</button>':''}</footer>`;
+      <footer><span>${n?`已有 ${n} 处修正和确认`:'还没有修正'}</span>${n&&!st.mergeFrom?'<button class="btn" id="sheetResetAll">清除全部修正</button>':''}</footer>`,listOnly))return;
   }
   $('#sheetX').onclick=closeSheet;
   const inp=$('#sheetSearch');
-  if(inp)inp.oninput=e=>{st.q=e.target.value;const pos=e.target.selectionStart;drawSheet();const i2=$('#sheetSearch');i2.focus();i2.setSelectionRange(pos,pos)};
+  if(inp)bindSearch(inp,v=>{st.q=v;drawSheet(true)});
   el.querySelectorAll('input[name=scope]').forEach(r=>r.onchange=()=>{st.scope=r.value});
   const reset=$('#sheetReset');if(reset)reset.onclick=()=>{const f2=fixes.get();delete f2.line[st.key];delete f2.ok[st.key];delete f2.meta[st.key];fixes.set(f2);closeSheet();rerender()};
   const ra=$('#sheetResetAll');if(ra)ra.onclick=()=>{const b=document.createElement('span');ra.replaceWith(b);b.innerHTML='确定清除？ <button class="btn" id="raYes">清除</button> <button class="btn" id="raNo">取消</button>';$('#raYes').onclick=()=>{const f0=fixes.get();fixes.set(Object.assign(fixes.blank(),{ts:f0.ts,tomb:f0.tomb}));drawSheet();rerender()};$('#raNo').onclick=drawSheet};
@@ -958,6 +969,13 @@ async function deleteChar(id){
   await applyCustom(false);rerender();
   toast(`已删除「${esc(c?c.name:'')}」`);
 }
+/* live search that works with Chinese input methods: ignore input while a pinyin composition is open */
+function bindSearch(inp,run){
+  let composing=false;
+  inp.addEventListener('compositionstart',()=>{composing=true});
+  inp.addEventListener('compositionend',()=>{composing=false;run(inp.value)});
+  inp.addEventListener('input',e=>{if(e.isComposing||composing)return;run(inp.value)});
+}
 function rerender(){if(!book)return;const pos=curPos();render(pos.ch,pos.p)}
 $('#main').addEventListener('click',e=>{
   if(!dlgReady())return;
@@ -1006,7 +1024,7 @@ function markToc(){
   const a=document.querySelector(`#tocList a[data-i="${idx}"]`);if(a)a.classList.add('cur');
 }
 $('#tocList').onclick=e=>{const a=e.target.closest('a');if(!a)return;e.preventDefault();render(+a.dataset.i);toggleToc(false)};
-$('#tocSearch').oninput=e=>buildToc(e.target.value);
+bindSearch($('#tocSearch'),v=>buildToc(v));
 function toggleToc(open){
   if(!book)return;
   $('#toc').classList.toggle('open',open);$('#shade').hidden=!open;
