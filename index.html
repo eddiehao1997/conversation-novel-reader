@@ -188,6 +188,8 @@ main .dl-narr{margin:0 0 .6em}
 .pick .av{width:30px;height:30px;font-size:13px;pointer-events:none}
 .pick .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pick .meta{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.grp{position:sticky;top:-6px;z-index:1;padding:6px 16px 3px;font-size:12px;color:var(--muted);background:var(--panel,var(--bg));letter-spacing:.04em}
+.grp.top{position:static}
 .pick.cur{background:color-mix(in oklab,var(--accent) 14%,transparent)}
 .pick.hidden-c .nm{text-decoration:line-through;color:var(--muted)}
 .pick .acts{display:flex;gap:6px}
@@ -767,6 +769,42 @@ function castRows(filter,f,opts={}){
   const list=dlg.cast.list.filter(c=>!f.merge[c.id]&&(opts.showHidden||!f.hide[c.id])&&(!q||c.name.includes(q)||(c.aliases||[]).some(a=>a.includes(q))));
   return q?list:list.slice(0,opts.limit||60);
 }
+/* who is in this chapter: everyone a line is given to (rules, model, the reader), everyone named in the text,
+   and characters the reader added while reading it. Ordered by lines, then mentions. */
+function chapterCast(ci,f){
+  const m=new Map(),get=id=>{id=resolveSpeaker(id,f);if(!id)return null;if(!m.has(id))m.set(id,{lines:0,ment:0});return m.get(id)};
+  if(!dlg.last||dlg.last.ci!==ci)analyzeChapter(ci);
+  for(const L of Object.values(dlg.last.lines)){const r=L.id&&get(L.id);if(r)r.lines++}
+  const pre=ci+':';
+  for(const [k,v] of Object.entries(f.line))if(k.startsWith(pre)&&v)get(v);
+  for(const p of book.chapters[ci].paras)for(const x of dlg.cast.matcher.all(p)){const r=get(x.id);if(r)r.ment++}
+  for(const [id,v] of Object.entries(f.chars||{}))if(v.ci===ci)get(id);
+  return [...m].map(([id,v])=>Object.assign({},castById(id),{chLines:v.lines,chMent:v.ment}))
+    .sort((a,b)=>b.chLines-a.chLines||b.chMent-a.chMent||b.lines-a.lines);
+}
+const zhColl=(()=>{try{return new Intl.Collator('zh-Hans-u-co-pinyin')}catch(e){return new Intl.Collator('zh')}})();
+/* the pinyin initial of a name, from the collator itself: the first character of each letter in pinyin order */
+const PY_START=[['A','阿'],['B','八'],['C','嚓'],['D','咑'],['E','妸'],['F','发'],['G','旮'],['H','哈'],['J','丌'],['K','咔'],['L','垃'],['M','妈'],['N','拏'],['O','噢'],['P','妑'],['Q','七'],['R','呥'],['S','仨'],['T','他'],['W','屲'],['X','夕'],['Y','丫'],['Z','帀']];
+const sortName=n=>String(n||'').replace(/^[“”"「」『』《》（）()\s·]+/,'');
+function pyInitial(name){
+  const ch=sortName(name)[0]||'';
+  if(/[a-z]/i.test(ch))return ch.toUpperCase();
+  if(!/[\u3400-\u9fff]/.test(ch))return '#';
+  let out='#';for(const [L,c] of PY_START){if(zhColl.compare(ch,c)>=0)out=L;else break}
+  return out;
+}
+function pickRow(c,st,meta){return `<button class="pick${c.id===st.current?' cur':''}" data-id="${esc(c.id)}">${avHTML(c)}<span class="nm">${esc(c.name)}</span><span class="meta">${meta}</span></button>`}
+function pickListHTML(st,search,f){
+  const q=search.trim(),match=c=>!q||c.name.includes(q)||(c.aliases||[]).some(a=>a.includes(q));
+  const ci=+String(st.key).split(':')[0];
+  const here=chapterCast(ci,f).filter(match);
+  const all=castRows(search,f,{limit:1e9}).sort((a,b)=>zhColl.compare(sortName(a.name),sortName(b.name))||zhColl.compare(a.name,b.name));
+  let html='';
+  if(here.length)html+='<div class="grp top">本章出场</div>'+here.map(c=>pickRow(c,st,c.chLines?`本章 ${c.chLines} 句`:'本章提到')).join('');
+  let last='';
+  for(const c of all){const L=pyInitial(c.name);if(L!==last){html+=`<div class="grp">${last?L:'全部角色 · '+L}</div>`;last=L}html+=pickRow(c,st,`${c.lines} 句`)}
+  return html;
+}
 function accuracyHTML(f){
   const st=sourceStats(f),dem=demotedSources(f);
   const nFix=Object.keys(f.line).length,nOk=Object.keys(f.ok).length;
@@ -798,7 +836,7 @@ function drawSheet(listOnly){
   if(st.form){drawCharForm(st,el);return}
   if(st.mode==='pick'){
     const curC=st.current?castById(st.current):null;
-    const rows=castRows(search,f).map(c=>`<button class="pick${c.id===st.current?' cur':''}" data-id="${esc(c.id)}">${avHTML(c)}<span class="nm">${esc(c.name)}</span><span class="meta">${c.lines} 句</span></button>`).join('');
+    const rows=pickListHTML(st,search,f);
     if(paintSheet(el,`<header><h3 id="sheetTitle">这句话是谁说的？<button class="btn" id="sheetX" aria-label="关闭">✕</button></h3>
       <div class="quote">${esc(st.quote||'')}</div>
       ${curC?`<div class="scope"><label><input type="radio" name="scope" value="line" ${st.scope!=='all'?'checked':''}>只改这一句</label><label><input type="radio" name="scope" value="all" ${st.scope==='all'?'checked':''}>本书所有「${esc(curC.name)}」都改</label></div>`:''}
@@ -951,7 +989,11 @@ async function saveChar(st){
   const clash=aliases.map(a=>[a,nameOwner(a,fm.id)]).find(x=>x[1]);
   if(clash){fm.err=`别名「${clash[0]}」已经属于「${clash[1].name}」`;drawSheet();return}
   const f=fixes.get(),id=fm.id||('+'+name+'.'+Date.now().toString(36));
-  f.chars[id]={name,aliases};fixes.set(f);
+  const prevCi=fm.id&&f.chars[id]?f.chars[id].ci:undefined;
+  f.chars[id]={name,aliases};
+  const addCi=prevCi!==undefined?prevCi:(st.mode==='pick'?+String(st.key).split(':')[0]:(book?curPos().ch:undefined));
+  if(Number.isInteger(addCi))f.chars[id].ci=addCi;
+  fixes.set(f);
   const editing=!!fm.id,key=st.key,forLine=st.mode==='pick'&&!editing;
   closeSheet();
   const extra=await applyCustom(false)||[];
